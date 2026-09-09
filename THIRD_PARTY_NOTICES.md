@@ -1,0 +1,8 @@
+# Third-party components
+
+- Qt 6.8.3 (Qt Base / Qt Tools), The Qt Company and contributors. The desktop application dynamically links Qt Widgets, Gui and Core. Qt is available under LGPLv3/GPLv3 or commercial terms; applicable license texts are copied from the Qt installation into the local application package. Source for this exact version: https://download.qt.io/archive/qt/6.8/6.8.3/single/ . Users may replace compatible Qt shared libraries. This project imposes no restriction on reverse engineering modifications for debugging LGPL library changes. Distributors must satisfy all applicable Qt license obligations before redistributing a package.
+- AJA NTV2 SDK 18.0.0, commit `4add45239a03960aa36de6fef326ee1b753e8ec9`, AJA Video Systems, Inc., MIT license. Source: https://github.com/aja-video/libajantv2/tree/4add45239a03960aa36de6fef326ee1b753e8ec9 . A narrow, reproducible compiler compatibility patch is in `scripts/patch_aja.py`; the original SDK license is included in local packages.
+- Blackmagic Design Desktop Video: installed separately by the operator. MSVC imports the installed driver's public COM type library to build the adapter. Driver DLLs, SDK headers and generated type-library headers are not distributed in this repository or copied into the application package. Blackmagic Design names and marks belong to their owner.
+- Microsoft Direct3D 11 and Visual C++ runtime are system/runtime dependencies installed separately. TriCaster is a workflow reference only; this is an independent project without Vizrt affiliation or copied product assets.
+
+Build-only dependencies (aqtinstall, CMake, Ninja, Python) are downloaded locally by `scripts/bootstrap.ps1` and are not application runtime components.

@@ -1,0 +1,126 @@
+#include "window.hpp"
+#include <QPainter>
+#include <QVBoxLayout>
+#include <QHBoxLayout>
+#include <QGridLayout>
+#include <QGroupBox>
+#include <QFormLayout>
+#include <QScrollArea>
+#include <QSettings>
+#include <QShortcut>
+#include <QMessageBox>
+#include <QSignalBlocker>
+#include <QApplication>
+#include <QLineEdit>
+#include <QAbstractSpinBox>
+namespace sw {
+Monitor::Monitor(QString title,QWidget* parent):QWidget(parent),title_(std::move(title)) { setMinimumSize(180,125);setSizePolicy(QSizePolicy::Expanding,QSizePolicy::Expanding); }
+void Monitor::updateImage(const Image& i,QString status,QColor accent) {
+    if(!i.rgba.empty()) image_=QImage(i.rgba.data(),i.width,i.height,i.width*4,QImage::Format_RGBA8888).copy();
+    status_=std::move(status);accent_=accent;update();
+}
+void Monitor::paintEvent(QPaintEvent*) {
+    QPainter p(this);p.fillRect(rect(),QColor("#090d12"));
+    auto area=QRect(2,31,width()-4,height()-35);
+    QSize fit=QSize(16,9);fit.scale(area.size(),Qt::KeepAspectRatio);QRect video(QPoint(0,0),fit);video.moveCenter(area.center());
+    if(!image_.isNull()) p.drawImage(video,image_);
+    else { p.setPen(QColor("#627084"));p.drawText(video,Qt::AlignCenter,"SW / NO VIDEO"); }
+    p.setPen(accent_);p.drawRect(rect().adjusted(1,1,-2,-2));p.fillRect(2,2,width()-4,27,accent_.darker(240));
+    p.setFont(QFont("Segoe UI",9,QFont::DemiBold));p.drawText(12,21,title_);p.drawText(QRect(65,3,width()-76,26),Qt::AlignRight|Qt::AlignVCenter,status_);
+}
+Window::Window() {
+    setWindowTitle("SW 0.1 — Software Video Switcher");resize(1480,940);
+    setStyleSheet(R"(QMainWindow,QWidget{background:#111820;color:#dce3ec;font-family:'Segoe UI';font-size:12px;}QGroupBox{border:1px solid #303e4e;border-radius:6px;margin-top:18px;padding:10px;}QGroupBox::title{subcontrol-origin:margin;left:10px;color:#8fa3b9;}QPushButton{background:#263444;border:1px solid #3d5064;padding:9px 14px;border-radius:4px;font-weight:600;}QPushButton:hover{background:#354960;}QPushButton:disabled{color:#627084;background:#1a242f;}QComboBox,QSpinBox,QDoubleSpinBox{background:#1b2835;border:1px solid #3d5064;border-radius:3px;padding:5px;}QLabel#headline{font-size:23px;font-weight:700;}QCheckBox{spacing:8px;}QScrollArea{border:0;})");
+    auto* scroll=new QScrollArea;scroll->setWidgetResizable(true);setCentralWidget(scroll);
+    auto* root=new QWidget;scroll->setWidget(root);auto* layout=new QVBoxLayout(root);layout->setContentsMargins(20,14,20,14);layout->setSpacing(12);
+    auto* header=new QHBoxLayout;auto* title=new QLabel("SW   /   VIDEO SWITCHER");title->setObjectName("headline");header->addWidget(title);header->addStretch();
+    auto* version=new QLabel("C++ · GPU 합성  |  개발 버전 0.1");version->setStyleSheet("color:#8fa3b9;");header->addWidget(version);layout->addLayout(header);
+    auto* top=new QHBoxLayout;
+    monitors_[5]=new Monitor("PREVIEW");monitors_[4]=new Monitor("PROGRAM");
+    monitors_[5]->setMinimumHeight(235);monitors_[4]->setMinimumHeight(235);top->addWidget(monitors_[5]);top->addWidget(monitors_[4]);layout->addLayout(top,2);
+    auto* inputs=new QHBoxLayout;
+    for(int i=0;i<4;++i) { auto* column=new QVBoxLayout;monitors_[i]=new Monitor(QString("INPUT %1").arg(i+1));column->addWidget(monitors_[i]);previewButtons_[i]=new QPushButton(QString("%1  ·  PVW 선택").arg(i+1));column->addWidget(previewButtons_[i]);inputs->addLayout(column);connect(previewButtons_[i],&QPushButton::clicked,this,[this,i]{engine_.selectPreview(i);});auto* shortcut=new QShortcut(QKeySequence(QString::number(i+1)),this);connect(shortcut,&QShortcut::activated,this,[this,i]{engine_.selectPreview(i);}); }
+    layout->addLayout(inputs,1);
+    auto* controls=new QHBoxLayout;
+    cut_=new QPushButton("CUT  [Space]");cut_->setMinimumHeight(44);cut_->setStyleSheet("background:#77373b;border-color:#bc5860;");
+    auto_=new QPushButton("AUTO MIX  [Enter]");auto_->setMinimumHeight(44);
+    duration_=new QSpinBox;duration_->setRange(1,600);duration_->setValue(30);duration_->setSuffix(" frames");
+    mute_=new QCheckBox("출력 음소거");mute_->setChecked(true);
+    controls->addWidget(cut_);controls->addWidget(auto_);controls->addWidget(duration_);controls->addSpacing(20);controls->addWidget(mute_);controls->addStretch();
+    controls->addWidget(new QLabel("DVE는 PVW에서 편집 → CUT / AUTO로 PGM에 적용"));layout->addLayout(controls);
+    connect(cut_,&QPushButton::clicked,this,[this]{engine_.cut();});connect(auto_,&QPushButton::clicked,this,[this]{engine_.autoMix(duration_->value());});connect(mute_,&QCheckBox::toggled,this,[this](bool m){engine_.setMuted(m);});
+    auto* cutKey=new QShortcut(QKeySequence(Qt::Key_Space),this);connect(cutKey,&QShortcut::activated,cut_,&QPushButton::click);
+    auto* autoKey=new QShortcut(QKeySequence(Qt::Key_Return),this);connect(autoKey,&QShortcut::activated,auto_,&QPushButton::click);
+    auto* lower=new QHBoxLayout;
+    auto* sessionBox=new QGroupBox("SESSION / SDI ROUTING");auto* sl=new QVBoxLayout(sessionBox);session_=new QWidget;auto* grid=new QGridLayout(session_);grid->setContentsMargins(0,0,0,0);
+    mode_=new QComboBox;mode_->addItems({"HD · 1080i29.97 (59.94 fields)","UHD · 2160p59.94"});sourceMode_=new QComboBox;sourceMode_->addItems({"테스트 패턴 · SDI 사용 안 함","실제 SDI · 4 IN / PGM + PVW"});
+    grid->addWidget(sourceMode_,0,0,1,2);grid->addWidget(mode_,0,2,1,2);
+    for(int i=0;i<6;++i) { ports_[i]=new QComboBox;ports_[i]->setMinimumWidth(180);ports_[i]->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon);grid->addWidget(new QLabel(i<4?QString("IN %1").arg(i+1):(i==4?"OUT 1 / PGM":"OUT 2 / PVW")),1+i/2,(i%2)*2);grid->addWidget(ports_[i],1+i/2,(i%2)*2+1); }
+    refresh_=new QPushButton("장치 다시 검색");grid->addWidget(refresh_,4,0,1,2);grid->addWidget(new QLabel("입력 4개의 포맷을 세션과 일치시키세요."),4,2,1,2);sl->addWidget(session_);
+    auto* actions=new QHBoxLayout;start_=new QPushButton("세션 시작");start_->setStyleSheet("background:#216455;border-color:#35947d;");stop_=new QPushButton("정지");actions->addWidget(start_);actions->addWidget(stop_);sl->addLayout(actions);
+    hardware_=new QLabel;hardware_->setWordWrap(true);hardware_->setStyleSheet("color:#8fa3b9;font-size:11px;");sl->addWidget(hardware_);lower->addWidget(sessionBox,3);
+    auto* dveBox=new QGroupBox("DVE / PICTURE IN PICTURE");dvePanel_=dveBox;auto* dg=new QGridLayout(dveBox);
+    dveEnabled_=new QCheckBox("PVW PIP 사용");dveSource_=new QComboBox;dveSource_->addItems({"INPUT 1","INPUT 2","INPUT 3","INPUT 4"});dg->addWidget(dveEnabled_,0,0,1,2);dg->addWidget(dveSource_,0,2,1,2);
+    const QStringList labels={"X 위치","Y 위치","가로","세로","왼쪽 크롭","위 크롭","오른쪽 크롭","아래 크롭","회전 °","불투명도","테두리"};
+    for(int i=0;i<11;++i) { auto* spin=new QDoubleSpinBox;dveValues_[i]=spin;spin->setDecimals(3);spin->setSingleStep(i==8?5:.01);spin->setRange(i<2?-1:0,i==8?360:(i<4?2:1));if(i==8) spin->setMinimum(-360);dg->addWidget(new QLabel(labels[i]),1+i/2,(i%2)*2);dg->addWidget(spin,1+i/2,(i%2)*2+1);connect(spin,qOverload<double>(&QDoubleSpinBox::valueChanged),this,[this]{applyDve();}); }
+    connect(dveEnabled_,&QCheckBox::toggled,this,[this]{applyDve();});connect(dveSource_,qOverload<int>(&QComboBox::currentIndexChanged),this,[this]{applyDve();});lower->addWidget(dveBox,2);layout->addLayout(lower);
+    status_=new QLabel("준비 · 세션을 시작하면 영상이 표시됩니다.");status_->setWordWrap(true);layout->addWidget(status_);
+    connect(refresh_,&QPushButton::clicked,this,[this]{refreshDevices();});connect(start_,&QPushButton::clicked,this,[this]{startSession();});connect(stop_,&QPushButton::clicked,this,[this]{engine_.stop();update();});
+    connect(sourceMode_,qOverload<int>(&QComboBox::currentIndexChanged),this,[this](int index){for(auto* p:ports_)p->setEnabled(index==1);});
+    QSettings settings;mode_->setCurrentIndex(settings.value("mode",0).toInt());refreshDevices();for(auto* p:ports_)p->setEnabled(false);
+    connect(qApp,&QApplication::focusChanged,this,[this](QWidget*,QWidget* focused) {
+        bool editing=false;
+        for(auto* p=focused;p;p=p->parentWidget()) if(qobject_cast<QLineEdit*>(p)||qobject_cast<QAbstractSpinBox*>(p)||qobject_cast<QComboBox*>(p)) {editing=true;break;}
+        for(auto* shortcut:findChildren<QShortcut*>())shortcut->setEnabled(!editing);
+    });
+    connect(&timer_,&QTimer::timeout,this,[this]{update();});timer_.start(100);update();
+}
+Window::~Window() { engine_.stop(); }
+void Window::refreshDevices() {
+    std::vector<std::string> warnings;devices_=probeDevices(warnings);QSettings settings;
+    for(int i=0;i<6;++i) {
+        const auto old=ports_[i]->currentData().toString();ports_[i]->clear();ports_[i]->addItem("포트 선택","");
+        for(const auto& e:devices_) if(i<4?e.input:e.output) ports_[i]->addItem(QString::fromStdString(e.label)+ (e.uhd?" [HD/UHD]":" [HD]"),QString::fromStdString(e.id));
+        QString saved=old.isEmpty()?settings.value(QString("port%1").arg(i)).toString():old;
+        ports_[i]->setCurrentIndex(std::max(0,ports_[i]->findData(saved)));
+    }
+    QString text=QString("사용 가능한 채널 %1개. 포트는 중복 지정할 수 없습니다.").arg(devices_.size());for(auto& w:warnings) text+="\n"+QString::fromStdString(w);
+    for(const auto& e:devices_) if(e.backend=="aja") { text+="\nAJA: "+QString::fromStdString(e.detail);break; }
+    hardware_->setText(text);
+}
+void Window::startSession() {
+    try {
+        Configuration c;c.mode=mode_->currentIndex()?Mode::Uhd:Mode::Hd;c.synthetic=sourceMode_->currentIndex()==0;QSettings settings;settings.setValue("mode",mode_->currentIndex());
+        if(!c.synthetic) for(int i=0;i<6;++i) {
+            auto id=ports_[i]->currentData().toString();auto e=std::find_if(devices_.begin(),devices_.end(),[&](const Endpoint& p){return p.id==id.toStdString();});
+            if(e==devices_.end()) throw std::runtime_error("Select all four inputs and both output ports before starting SDI.");
+            if(i<4)c.inputs[i]=*e;else c.outputs[i-4]=*e;settings.setValue(QString("port%1").arg(i),id);
+        }
+        engine_.setMuted(mute_->isChecked());engine_.start(c);update();
+    } catch(const std::exception& e) { QMessageBox::warning(this,"SW · 세션 시작 실패",QString::fromUtf8(e.what())); }
+}
+void Window::startDemo() { sourceMode_->setCurrentIndex(0);startSession(); }
+void Window::applyDve() {
+    if(syncing_)return;Dve d;d.enabled=dveEnabled_->isChecked();d.source=dveSource_->currentIndex();
+    float* values[]={&d.x,&d.y,&d.width,&d.height,&d.cropLeft,&d.cropTop,&d.cropRight,&d.cropBottom,&d.rotation,&d.opacity,&d.border};
+    for(int i=0;i<11;++i)*values[i]=float(dveValues_[i]->value());engine_.setDve(d);
+}
+void Window::update() {
+    auto s=engine_.snapshot();const bool busy=s.running||s.starting;session_->setEnabled(!busy);start_->setEnabled(!busy);stop_->setEnabled(busy);cut_->setEnabled(s.running&&!s.state.transitioning);auto_->setEnabled(cut_->isEnabled());dvePanel_->setEnabled(s.running&&!s.state.transitioning);
+    for(int i=0;i<6;++i) {
+        bool valid=i<4?s.signal[i]:s.running;QString label=!busy?"STOPPED":(!valid?"NO SIGNAL":(s.synthetic?"TEST":(i==4?"SDI PGM":i==5?"SDI PVW":"SDI")));
+        QColor color=i==4?QColor("#ed6a73"):i==5?QColor("#4ed2a0"):QColor("#69809b");monitors_[i]->updateImage(s.monitors[i],label,color);
+    }
+    for(int i=0;i<4;++i) { previewButtons_[i]->setEnabled(s.running&&!s.state.transitioning);previewButtons_[i]->setStyleSheet(i==s.state.preview.background?"background:#216455;border-color:#4ed2a0;":""); }
+    syncing_=true;const auto& d=s.state.preview.dve;dveEnabled_->setChecked(d.enabled);dveSource_->setCurrentIndex(d.source);
+    const float values[]={d.x,d.y,d.width,d.height,d.cropLeft,d.cropTop,d.cropRight,d.cropBottom,d.rotation,d.opacity,d.border};
+    for(int i=0;i<11;++i) if(!dveValues_[i]->hasFocus()) dveValues_[i]->setValue(values[i]);syncing_=false;
+    uint64_t dropped=0;for(auto& io:s.io)dropped+=io.dropped;
+    QString status=s.starting?"장치와 GPU 초기화 중…":s.running?(s.synthetic?"테스트 패턴 실행 중 · SDI 출력 없음":"SDI 세션 실행 중"):"정지 · 마지막 수신 화면 유지";
+    status+=QString("  |  %1 ms  ·  처리 지연 %2  ·  I/O 드롭 %3  ·  오디오 부족 %4").arg(s.renderMs,0,'f',1).arg(s.overruns).arg(dropped).arg(s.audioUnderruns);
+    if(!s.adapter.empty())status+="  |  "+QString::fromStdString(s.adapter);
+    if(!s.error.empty())status="세션 오류: "+QString::fromStdString(s.error);
+    status_->setText(status);status_->setStyleSheet(s.error.empty()?"color:#93a5b8;":"color:#ff929a;");
+}
+bool Window::savePreview(const QString& path) { update();return grab().save(path); }
+}
