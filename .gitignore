@@ -1,0 +1,41 @@
+# Local settings and credentials
+.env
+.env.*
+!.env.example
+*.local
+CMakeUserPresets.json
+
+# Build products and tools
+node_modules/
+build/
+build-*/
+out/
+dist/
+.vs/
+.idea/
+CMakeFiles/
+CMakeCache.txt
+*.user
+*.suo
+*.obj
+*.pdb
+*.ilk
+*.exe
+*.dll
+*.lib
+*.exp
+
+# Vendor SDK installation files (use documented local paths)
+vendor-sdk/
+third_party/sdk/
+
+# Captured media, runtime data and local QA output
+recordings/
+captures/
+logs/
+local-qa/
+*.dmp
+
+# OS files
+Thumbs.db
+.DS_Store
