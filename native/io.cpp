@@ -2,6 +2,13 @@
 #include <set>
 #include <stdexcept>
 namespace sw {
+std::vector<Endpoint> probeReceiveDevices(const std::string& backend,std::vector<std::string>& warnings) {
+    if(backend=="decklink") return probeDeckLink(warnings);
+#ifdef SW_HAS_AJA
+    if(backend=="aja") return probeAja(warnings);
+#endif
+    warnings.push_back("Receive backend unavailable: "+backend);return {};
+}
 std::vector<Endpoint> probeDevices(std::vector<std::string>& warnings) {
     auto devices=probeDeckLink(warnings);
 #ifdef SW_HAS_AJA
@@ -35,14 +42,15 @@ void validateRouting(const std::array<Endpoint,4>& inputs,const std::array<Endpo
     for(const auto& e:inputs) check(e,true);
     for(const auto& e:outputs) check(e,false);
 }
-void validateReceiveRouting(const std::array<Endpoint,4>& inputs,Mode mode) {
+void validateReceiveRouting(const std::array<Endpoint,4>& inputs,Mode mode,const std::string& backend) {
+    if(backend!="decklink"&&backend!="aja") throw std::runtime_error("Unknown receive backend.");
     std::set<std::string> used;
     for(const auto& e:inputs) {
         if(e.id.empty()) continue;
-        if(e.backend!="decklink"||!e.input) throw std::runtime_error("Receive-only mode accepts DeckLink inputs only; KONA belongs to the external player.");
-        if(!used.insert(e.id).second) throw std::runtime_error("The same DeckLink input cannot be assigned twice.");
+        if(e.backend!=backend||!e.input) throw std::runtime_error("Select inputs from the chosen receive card only: "+backend);
+        if(!used.insert(e.id).second) throw std::runtime_error("The same input cannot be assigned twice.");
         if(!(mode==Mode::Uhd?e.uhd:e.hd)) throw std::runtime_error("Selected input does not support the session format.");
     }
-    if(used.empty()) throw std::runtime_error("Select at least one DeckLink input.");
+    if(used.empty()) throw std::runtime_error("Select at least one input from "+backend+".");
 }
 }

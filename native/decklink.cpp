@@ -40,6 +40,21 @@ template<class T> static bool supports(T* port,Format f) {
     else r=port->DoesSupportVideoMode(bmd::bmdVideoConnectionSDI,bmode(f),bmd::bmdFormat8BitYUV,bmd::bmdNoVideoOutputConversion,bmd::bmdSupportedVideoModeDefault,&actual,&supported);
     return SUCCEEDED(r)&&supported&&actual==bmode(f);
 }
+static std::string inputStatus(bmd::IDeckLinkStatus* status,bmd::IDeckLinkInput* input) {
+    if(!status)return "status=unavailable";
+    std::string text;long locked=0;
+    if(SUCCEEDED(status->GetFlag(bmd::bmdDeckLinkStatusVideoInputSignalLocked,&locked)))text="signal="+std::string(locked?"locked":"unlocked");
+    __int64 value=0;
+    if(SUCCEEDED(status->GetInt(bmd::bmdDeckLinkStatusDetectedVideoInputMode,&value))) {
+        ComPtr<bmd::IDeckLinkDisplayMode> mode;
+        if(input&&SUCCEEDED(input->GetDisplayMode(bmd::_BMDDisplayMode(value),&mode))&&mode) {
+            BSTR name=nullptr;if(SUCCEEDED(mode->GetName(&name))) {text+="; detected="+utf8(name);SysFreeString(name);}
+        } else text+="; detected=unknown";
+    }
+    if(SUCCEEDED(status->GetInt(bmd::bmdDeckLinkStatusDetectedVideoInputFieldDominance,&value)))text+="; scan="+std::string(value==bmd::bmdProgressiveFrame?"progressive":value==bmd::bmdUpperFieldFirst?"upper-field-first":value==bmd::bmdLowerFieldFirst?"lower-field-first":"unknown");
+    if(SUCCEEDED(status->GetInt(bmd::bmdDeckLinkStatusDetectedSDILinkConfiguration,&value)))text+="; link="+std::string(value==bmd::bmdLinkConfigurationSingleLink?"single":value==bmd::bmdLinkConfigurationDualLink?"dual":value==bmd::bmdLinkConfigurationQuadLink?"quad":"unknown");
+    return text;
+}
 std::vector<Endpoint> probeDeckLink(std::vector<std::string>& warnings) {
     std::vector<Endpoint> result;
     try {
@@ -57,6 +72,7 @@ std::vector<Endpoint> probeDeckLink(std::vector<std::string>& warnings) {
             bool uhd=(cap&&supports(input.Get(),Format::of(Mode::Uhd)))||(play&&supports(output.Get(),Format::of(Mode::Uhd)));
             ComPtr<bmd::IDeckLinkStatus> status;__int64 busy=0;std::string detail="subdevices="+std::to_string(sub)+"; duplex="+std::to_string(duplex);
             if(SUCCEEDED(cards[i].As(&status))&&SUCCEEDED(status->GetInt(bmd::bmdDeckLinkStatusBusy,&busy)))detail+="; capture="+std::string(busy&bmd::bmdDeviceCaptureBusy?"busy":"idle");
+            detail+="; "+inputStatus(status.Get(),input.Get());
             result.push_back({"decklink:"+std::to_string(i),label,"decklink",detail,i,0,cap,play,uhd,hd});
         }
     } catch(const std::exception& e) { warnings.push_back(e.what()); }
@@ -126,12 +142,12 @@ public:
     HRESULT STDMETHODCALLTYPE VideoInputFrameArrived(bmd::IDeckLinkVideoInputFrame* video,bmd::IDeckLinkAudioInputPacket* audio) override {
         if(!active||!video) return S_OK;
         try {
-            if(video->GetFlags()&bmd::bmdFrameHasNoInputSource) { std::lock_guard lock(mutex);++counters.dropped;return S_OK; }
+            if(video->GetFlags()&bmd::bmdFrameHasNoInputSource) { std::lock_guard lock(mutex);++counters.noSignal;counters.audioPeak=-120.;return S_OK; }
             if(video->GetWidth()!=format.width||video->GetHeight()!=format.height||video->GetPixelFormat()!=bmd::bmdFormat8BitYUV) throw std::runtime_error("Unexpected capture format. Stop and select the matching session mode.");
             auto frame=pool.acquire(format);if(!frame) { std::lock_guard lock(mutex);++counters.dropped;return S_OK; }
             { Access access(video,bmd::bmdBufferAccessRead);for(int y=0;y<format.height;++y) std::memcpy(frame->data.data()+size_t(y)*frame->stride,(uint8_t*)access.bytes+size_t(y)*video->GetRowBytes(),frame->stride); }
             if(audio) { void* bytes=nullptr;bcheck(audio->GetBytes(&bytes),"get audio bytes");const long count=audio->GetSampleFrameCount();if(bytes&&count>0&&count<8192) frame->audio.assign((int32_t*)bytes,(int32_t*)bytes+count*2); }
-            { std::lock_guard lock(mutex);frame->sequence=counters.frames++; }
+            { std::lock_guard lock(mutex);frame->sequence=counters.frames++;counters.audioFrames+=frame->audio.size()/2;counters.audioPeak=audioPeakDb(frame->audio); }
             frame->captured=std::chrono::steady_clock::now();callback(frame);
         } catch(const std::exception& e) { std::lock_guard lock(mutex);counters.error=e.what(); }
         return S_OK;
@@ -143,8 +159,11 @@ class DeckOutput final:public Output,public bmd::IDeckLinkVideoOutputCallback {
     mutable std::mutex mutex;
     std::vector<ComPtr<bmd::IDeckLinkMutableVideoFrame>> buffers;
     std::deque<bmd::IDeckLinkMutableVideoFrame*> free;
-    IoStats counters;Format format;uint64_t scheduled=0,audioTime=0;
+    struct AudioPacket {std::vector<int32_t> samples;uint64_t time=0;unsigned offset=0;};
+    std::deque<AudioPacket> pendingAudio;
+    IoStats counters;Format format;uint64_t scheduled=0;
     bool active=false,playback=false;
+    bool videoEnabled=false,audioEnabled=false,callbackSet=false;
 public:
     ~DeckOutput() override { stop(); }
     HRESULT STDMETHODCALLTYPE QueryInterface(REFIID id,void** out) override {
@@ -153,14 +172,19 @@ public:
     ULONG STDMETHODCALLTYPE AddRef() override { return ++refs; }
     ULONG STDMETHODCALLTYPE Release() override { return --refs; }
     void start(const Endpoint& e,Format f) override {
-        stop();format=f;counters={};scheduled=audioTime=0;
+        stop();format=f;counters={};scheduled=0;
         auto card=select(e.device);bcheck(card.As(&output),"get output interface");
+        ComPtr<bmd::IDeckLinkStatus> status;__int64 busy=0;
+        if(SUCCEEDED(card.As(&status))&&SUCCEEDED(status->GetInt(bmd::bmdDeckLinkStatusBusy,&busy))&&(busy&bmd::bmdDevicePlaybackBusy)) {output.Reset();throw std::runtime_error("DeckLink output is already used by another player or SW session.");}
         if(!supports(output.Get(),f)) { output.Reset();throw std::runtime_error("Selected DeckLink SDI output mode is unsupported in the current profile."); }
         try {
             bcheck(output->EnableVideoOutput(bmode(f),bmd::bmdVideoOutputFlagDefault),"enable output");
+            videoEnabled=true;
             bcheck(output->EnableAudioOutput(bmd::bmdAudioSampleRate48kHz,bmd::bmdAudioSampleType32bitInteger,2,bmd::bmdAudioOutputStreamTimestamped),"enable audio output");
+            audioEnabled=true;
             bcheck(output->BeginAudioPreroll(),"begin audio preroll");
             bcheck(output->SetScheduledFrameCompletionCallback(this),"set output callback");
+            callbackSet=true;
             int rowBytes=0;bcheck(output->RowBytesForPixelFormat(bmd::bmdFormat8BitYUV,f.width,&rowBytes),"query output stride");
             for(int i=0;i<5;++i) { ComPtr<bmd::IDeckLinkMutableVideoFrame> b;bcheck(output->CreateVideoFrame(f.width,f.height,rowBytes,bmd::bmdFormat8BitYUV,bmd::bmdFrameFlagDefault,&b),"create output frame");free.push_back(b.Get());buffers.push_back(b); }
             active=true;
@@ -171,12 +195,25 @@ public:
         { std::lock_guard lock(mutex);if(!active||free.empty()) { ++counters.dropped;return false; }buffer=free.front();free.pop_front(); }
         try {
             { Access access(buffer,bmd::bmdBufferAccessWrite);for(int y=0;y<format.height;++y) std::memcpy((uint8_t*)access.bytes+size_t(y)*buffer->GetRowBytes(),f->data.data()+size_t(y)*f->stride,f->stride); }
+            if(playback) {
+                __int64 hardwareTime=0;double speed=0;
+                bcheck(output->GetScheduledStreamTime(format.timeScale,&hardwareTime,&speed),"read output hardware clock");
+                const auto next=recoverOutputFrame(scheduled,hardwareTime,format);
+                if(next!=scheduled) {scheduled=next;pendingAudio.clear();std::lock_guard lock(mutex);++counters.timingRecoveries;}
+            }
             bcheck(output->ScheduleVideoFrame(buffer,scheduled*format.frameDuration,format.frameDuration,format.timeScale),"schedule output frame");
-            const unsigned count=audioSamples(scheduled,format);std::vector<int32_t> samples(size_t(count)*2,0);
-            std::copy_n(f->audio.begin(),std::min(samples.size(),f->audio.size()),samples.begin());
-            unsigned int written=0;bcheck(output->ScheduleAudioSamples(samples.data(),count,audioTime,48000,&written),"schedule audio");
-            if(written!=count) throw std::runtime_error("DeckLink audio scheduler accepted only part of a packet.");
-            audioTime+=written;
+            const unsigned count=audioSamples(scheduled,format);AudioPacket packet;packet.time=audioSampleTime(scheduled,format);packet.samples.assign(size_t(count)*2,0);
+            std::copy_n(f->audio.begin(),std::min(packet.samples.size(),f->audio.size()),packet.samples.begin());pendingAudio.push_back(std::move(packet));
+            if(pendingAudio.size()>8)throw std::runtime_error("DeckLink audio scheduler backlog exceeded eight packets.");
+            while(!pendingAudio.empty()) {
+                auto& p=pendingAudio.front();const unsigned remaining=unsigned(p.samples.size()/2)-p.offset;unsigned written=0;
+                bcheck(output->ScheduleAudioSamples(p.samples.data()+size_t(p.offset)*2,remaining,p.time+p.offset,48000,&written),"schedule audio");
+                if(written>remaining)throw std::runtime_error("Invalid DeckLink audio write count.");
+                {std::lock_guard lock(mutex);counters.audioFrames+=written;if(written<remaining)++counters.audioPartialWrites;}
+                p.offset+=written;if(written<remaining)break;pendingAudio.pop_front();
+            }
+            unsigned buffered=0;output->GetBufferedAudioSampleFrameCount(&buffered);
+            {std::lock_guard lock(mutex);counters.bufferedAudioFrames=buffered;counters.audioPeak=audioPeakDb(f->audio);}
             ++scheduled;
             if(!playback&&scheduled>=3) { bcheck(output->EndAudioPreroll(),"end audio preroll");bcheck(output->StartScheduledPlayback(0,format.timeScale,1),"start scheduled playback");playback=true; }
             return true;
@@ -191,8 +228,8 @@ public:
     HRESULT STDMETHODCALLTYPE ScheduledPlaybackHasStopped() override { return S_OK; }
     void stop() noexcept override {
         { std::lock_guard lock(mutex);active=false; }
-        if(output) { __int64 stopped=0;output->StopScheduledPlayback(0,&stopped,format.timeScale);output->SetScheduledFrameCompletionCallback(nullptr);output->DisableAudioOutput();output->DisableVideoOutput(); }
-        playback=false;output.Reset();std::lock_guard lock(mutex);free.clear();buffers.clear();
+        if(output) { __int64 stopped=0;if(videoEnabled)output->StopScheduledPlayback(0,&stopped,format.timeScale);if(callbackSet)output->SetScheduledFrameCompletionCallback(nullptr);if(audioEnabled)output->DisableAudioOutput();if(videoEnabled)output->DisableVideoOutput(); }
+        videoEnabled=audioEnabled=callbackSet=false;pendingAudio.clear();playback=false;output.Reset();std::lock_guard lock(mutex);free.clear();buffers.clear();
     }
     IoStats stats() const override { std::lock_guard lock(mutex);return counters; }
 };

@@ -19,5 +19,13 @@ int main() try {
     receive[2].backend="aja";rejectReceive();receive[2].backend="decklink";
     receive[2].uhd=false;rejectReceive();receive[2].uhd=true;
     receive[2].input=false;rejectReceive();
+    receive[2]={"aja:0:0","KONA 5 SDI 1","aja","",0,0,true,true,true,true};
+    sw::validateReceiveRouting(receive,sw::Mode::Uhd,"aja");
+    sw::validateReceiveRouting(receive,sw::Mode::Hd,"aja");
+    auto rejectAja=[&] {try {sw::validateReceiveRouting(receive,sw::Mode::Uhd,"aja");}catch(const std::runtime_error&){return;}throw std::runtime_error("Invalid KONA receive routing accepted");};
+    receive[0]=receive[2];rejectAja();receive[0]={};
+    receive[2].backend="decklink";rejectAja();receive[2].backend="aja";
+    receive[2].uhd=false;rejectAja();receive[2].uhd=true;
+    receive[2].input=false;rejectAja();receive[2]={};rejectAja();
     std::cout<<"Duplicate ports, unsupported format and wrong direction rejected.\n";return 0;
 } catch(const std::exception& e) {std::cerr<<e.what()<<'\n';return 1;}

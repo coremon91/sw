@@ -9,6 +9,7 @@ struct Configuration {
     Mode mode=Mode::Hd;
     bool synthetic=true;
     bool receiveOnly=false;
+    std::string receiveBackend="decklink";
     std::array<Endpoint,4> inputs;
     std::array<Endpoint,2> outputs;
 };
@@ -17,11 +18,18 @@ struct Snapshot {
     bool receiveOnly=false;
     std::array<bool,4> assigned{};
     std::array<double,4> inputFps{};
+    std::array<uint64_t,4> monitorSkipped{};
+    std::array<uint32_t,4> audioBuffered{};
+    std::array<double,2> outputAudioPeak{-120.,-120.};
+    bool muted=true;
+    uint64_t audioOverflowFrames=0;
     RenderState state;
     std::array<Image,6> monitors;
     std::array<bool,4> signal{};
     std::array<IoStats,6> io;
     uint64_t ticks=0, overruns=0, audioUnderruns=0;
+    uint64_t monitorFrames=0;
+    double monitorFps=0;
     double renderMs=0, sourceMs=0, gpuMs=0;
     std::string adapter,error;
 };

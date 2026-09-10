@@ -15,6 +15,31 @@ uint32_t audioSamples(uint64_t frame, const Format& f) {
     const auto phase = frame % uint64_t(f.timeScale);
     return uint32_t(((phase + 1) * numerator) / f.timeScale - (phase * numerator) / f.timeScale);
 }
+uint64_t audioSampleTime(uint64_t frame,const Format& f) {
+    const uint64_t n=48000ULL*f.frameDuration;
+    return (frame/uint64_t(f.timeScale))*n+(frame%uint64_t(f.timeScale))*n/uint64_t(f.timeScale);
+}
+uint64_t recoverOutputFrame(uint64_t planned,int64_t hardwareTime,const Format& f) {
+    if(hardwareTime<0)return planned;
+    const uint64_t current=uint64_t(hardwareTime)/uint64_t(f.frameDuration);
+    // A missed deadline must not leave all subsequent audio packets in the past.
+    return planned<=current+1?current+4:planned;
+}
+double audioPeakDb(const std::vector<int32_t>& samples) {
+    int64_t peak=0;for(auto s:samples)peak=std::max(peak,std::abs(int64_t(s)));
+    return peak?std::max(-120.,20*std::log10(double(peak)/2147483648.)):-120.;
+}
+void AudioQueue::push(const std::vector<int32_t>& samples) {
+    data_.insert(data_.end(),samples.begin(),samples.begin()+samples.size()/2*2);
+    while(data_.size()>9600) {data_.pop_front();data_.pop_front();++overflowFrames;}
+}
+std::vector<int32_t> AudioQueue::take(uint32_t frames) {
+    std::vector<int32_t> result(size_t(frames)*2,0);
+    // Retain 20 ms of input jitter reserve before beginning/recovering playback.
+    if(!primed_) {if(bufferedFrames()<frames+960)return result;primed_=true;}
+    if(bufferedFrames()<frames) {++underruns;primed_=false;return result;}
+    for(auto& s:result) {s=data_.front();data_.pop_front();}return result;
+}
 void Dve::sanitize() {
     auto finite = [](float n,float fallback) { return std::isfinite(n) ? n : fallback; };
     source = std::clamp(source,0,3);

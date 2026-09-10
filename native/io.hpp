@@ -9,7 +9,12 @@ struct Endpoint {
     int device=0, channel=0;
     bool input=false,output=false,uhd=false,hd=false;
 };
-struct IoStats { uint64_t frames=0,dropped=0; std::string error; };
+struct IoStats {
+    uint64_t frames=0,dropped=0; std::string error;
+    uint64_t noSignal=0,audioFrames=0,timingRecoveries=0,audioPartialWrites=0;
+    uint32_t bufferedAudioFrames=0;
+    double audioPeak=-120.;
+};
 using FrameCallback=std::function<void(FramePtr)>;
 class Input {
 public:
@@ -27,6 +32,7 @@ public:
     virtual IoStats stats() const=0;
 };
 std::vector<Endpoint> probeDevices(std::vector<std::string>& warnings);
+std::vector<Endpoint> probeReceiveDevices(const std::string& backend,std::vector<std::string>& warnings);
 std::unique_ptr<Input> makeInput(const Endpoint&);
 std::unique_ptr<Output> makeOutput(const Endpoint&);
 std::vector<Endpoint> probeDeckLink(std::vector<std::string>&);
@@ -38,5 +44,5 @@ std::unique_ptr<Input> ajaInput();
 std::unique_ptr<Output> ajaOutput();
 #endif
 void validateRouting(const std::array<Endpoint,4>&,const std::array<Endpoint,2>&,Mode);
-void validateReceiveRouting(const std::array<Endpoint,4>&,Mode);
+void validateReceiveRouting(const std::array<Endpoint,4>&,Mode,const std::string& backend="decklink");
 }

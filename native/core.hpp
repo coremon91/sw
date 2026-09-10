@@ -7,6 +7,7 @@
 #include <mutex>
 #include <string>
 #include <vector>
+#include <deque>
 
 namespace sw {
 enum class Mode { Hd, Uhd };
@@ -23,6 +24,19 @@ struct Format {
 constexpr int64_t tickNumerator = 1001, tickDenominator = 60000;
 std::chrono::nanoseconds tickTime(uint64_t tick);
 uint32_t audioSamples(uint64_t frame, const Format& format);
+uint64_t audioSampleTime(uint64_t frame,const Format& format);
+uint64_t recoverOutputFrame(uint64_t planned,int64_t hardwareTime,const Format& format);
+double audioPeakDb(const std::vector<int32_t>& samples);
+class AudioQueue {
+public:
+    void push(const std::vector<int32_t>& samples);
+    std::vector<int32_t> take(uint32_t frames);
+    size_t bufferedFrames() const {return data_.size()/2;}
+    uint64_t underruns=0,overflowFrames=0;
+private:
+    std::deque<int32_t> data_;
+    bool primed_=false;
+};
 
 struct Dve {
     bool enabled = false;

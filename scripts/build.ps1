@@ -34,5 +34,8 @@ try {
     Copy-Item -LiteralPath docs/03-implementation.ko.md -Destination dist/SW/사용안내.md
     Copy-Item -LiteralPath scripts/UHD-loopback.cmd -Destination dist/SW/
     Copy-Item -LiteralPath scripts/DeckLink-receive.cmd -Destination dist/SW/
+    Copy-Item -LiteralPath scripts/KONA-receive.cmd -Destination dist/SW/
+    Copy-Item -LiteralPath docs/06-receiver-jitter.ko.md -Destination dist/SW/수신시험안내.md
+    Copy-Item -LiteralPath docs/07-audio-validation.ko.md -Destination dist/SW/오디오시험안내.md
     Write-Host 'Ready: dist/SW/sw_switcher.exe (requires installed Visual C++ x64 runtime and card drivers).'
 } finally { Pop-Location }

@@ -12,7 +12,7 @@ namespace sw {
 class Monitor:public QWidget {
 public:
     explicit Monitor(QString title,QWidget* parent=nullptr);
-    void updateImage(const Image&,QString status,QColor accent);
+    void updateImage(const Image&,QString status,QColor accent,bool newImage=true);
 protected:
     void paintEvent(QPaintEvent*) override;
 private:
@@ -22,10 +22,13 @@ private:
 };
 class Window:public QMainWindow {
 public:
-    explicit Window(bool receiver=false);
+    explicit Window(int receiver=0);
     ~Window() override;
     void startDemo();
+    void startSdi(int program,bool unmute,bool uhd,const QStringList& ports);
+    void setDiagnosticsPath(QString path) {diagnosticsPath_=std::move(path);}
     bool savePreview(const QString&);
+    bool verifyStableLayout();
 private:
     Engine engine_;
     QTimer timer_;
@@ -42,6 +45,12 @@ private:
     QLabel* routingHint_;
     std::vector<Endpoint> devices_;
     bool syncing_=false;
+    uint64_t lastMonitorFrames_=0;
+    std::chrono::steady_clock::time_point nextControls_{};
+    std::chrono::steady_clock::time_point nextDiagnostics_{};
+    QString diagnosticsPath_;
+    int previousRoutingMode_=-1;
+    QLabel* audioStatus_;
     void refreshDevices();
     void startSession();
     void update();

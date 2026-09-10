@@ -98,8 +98,18 @@ std::vector<Endpoint> probeAja(std::vector<std::string>& warnings) {
         auto& f=card.features();
         const int channels=std::min<int>(f.GetNumFrameStores(),std::max(f.GetNumVideoInputs(),f.GetNumVideoOutputs()));
         std::string detail="deviceID="+std::to_string(uint32_t(card.GetDeviceID()))+"; 12G routing="+(f.CanDo12gRouting()?"yes":"no");
+        ULWord owner=0;int32_t pid=0;
+        if(card.GetStreamingApplication(owner,pid))detail+="; ownerPID="+std::to_string(pid);
         if(!f.CanDo12gRouting()) detail+="; UHD independent channels require a supported 12G frame-store firmware; no firmware changes are automatic";
-        for(int i=0;i<channels;++i) out.push_back({"aja:"+std::to_string(index)+":"+std::to_string(i),card.GetDisplayName()+" / SDI "+std::to_string(i+1),"aja",detail,int(index),i,i<f.GetNumVideoInputs(),i<f.GetNumVideoOutputs(),f.CanDo12gRouting()&&f.CanDoVideoFormat(NTV2_FORMAT_3840x2160p_5994),f.CanDoVideoFormat(NTV2_FORMAT_1080i_5994)});
+        for(int i=0;i<channels;++i) {
+            std::string channelDetail=detail;bool transmit=false;
+            if(card.GetSDITransmitEnable(NTV2Channel(i),transmit))channelDetail+="; direction="+std::string(transmit?"output":"input");
+            if(!transmit&&i<f.GetNumVideoInputs()) {
+                const auto detected=card.GetInputVideoFormat(NTV2InputSource(NTV2_INPUTSOURCE_SDI1+i));
+                channelDetail+="; signal="+std::string(detected==NTV2_FORMAT_UNKNOWN?"unknown":"locked")+"; detected="+NTV2VideoFormatToString(detected);
+            }
+            out.push_back({"aja:"+std::to_string(index)+":"+std::to_string(i),card.GetDisplayName()+" / SDI "+std::to_string(i+1),"aja",channelDetail,int(index),i,i<f.GetNumVideoInputs(),i<f.GetNumVideoOutputs(),f.CanDo12gRouting()&&f.CanDoVideoFormat(NTV2_FORMAT_3840x2160p_5994),f.CanDoVideoFormat(NTV2_FORMAT_1080i_5994)});
+        }
     }
     if(out.empty()) warnings.push_back("No AJA devices detected.");
     return out;
@@ -116,7 +126,7 @@ public:
     mutable std::mutex mutex;
     std::deque<FramePtr> queue;
     IoStats counters;
-    bool capture=false,initialized=false;
+    bool capture=false,initialized=false,inputSubscribed=false;
     unsigned audioChannels=16;
     FrameCallback callback;
     ~AjaStream() { stop(); }
@@ -138,6 +148,10 @@ public:
             ajaCheck(c.SetVideoFormat(vf,false,false,channel),"set video format");
             ajaCheck(c.SetFrameBufferFormat(channel,NTV2_FBF_8BIT_YCBCR),"set pixel format");
             ajaCheck(c.SetMode(channel,capture?NTV2_MODE_CAPTURE:NTV2_MODE_DISPLAY),"set frame store direction");
+            if(capture) {
+                ajaCheck(c.EnableInputInterrupt(channel),"enable capture interrupt");
+                ajaCheck(c.SubscribeInputVerticalEvent(channel),"subscribe capture vertical event");inputSubscribed=true;
+            }
             if(c.features().CanDo12gRouting()) {
                 ajaCheck(c.Set4kSquaresEnable(false,channel)&&c.SetTsiFrameEnable(!f.interlaced,channel),"set native 12G raster layout");
                 ajaCheck(c.SetSDIOut12GEnable(channel,!f.interlaced),"configure 12G output");
@@ -181,6 +195,14 @@ public:
                 { std::lock_guard lock(mutex);if(hardwareDrops>=lastHardwareDrops)counters.dropped+=hardwareDrops-lastHardwareDrops; }lastHardwareDrops=hardwareDrops;
                 if(capture) {
                     if(!status.HasAvailableInputFrame()) { std::this_thread::sleep_for(std::chrono::milliseconds(2));continue; }
+                    bool validInput=false;
+                    {std::lock_guard lock(board->mutex);validInput=board->card.GetInputVideoFormat(NTV2InputSource(NTV2_INPUTSOURCE_SDI1+int(channel)),!format.interlaced)==ajaFormat(format);}
+                    if(!validInput) {
+                        // Drain unavailable inputs without copying an entire UHD raster to RAM.
+                        AUTOCIRCULATE_TRANSFER discard;
+                        {std::lock_guard lock(board->mutex);ajaCheck(board->card.AutoCirculateTransfer(channel,discard),"discard no-signal frame");}
+                        std::lock_guard lock(mutex);++counters.noSignal;counters.audioPeak=-120.;continue;
+                    }
                     auto frame=pool.acquire(format);
                     if(!frame) { std::lock_guard lock(mutex);++counters.dropped;std::this_thread::yield();continue; }
                     AUTOCIRCULATE_TRANSFER transfer;
@@ -188,14 +210,14 @@ public:
                     if(audioSystem!=NTV2_AUDIOSYSTEM_INVALID) transfer.SetAudioBuffer(reinterpret_cast<ULWord*>(audio.data()),ULWord(audio.size()*4));
                     { std::lock_guard lock(board->mutex);ajaCheck(board->card.AutoCirculateTransfer(channel,transfer),"capture DMA"); }
                     { std::lock_guard lock(board->mutex);
-                      if(board->card.GetInputVideoFormat(NTV2InputSource(NTV2_INPUTSOURCE_SDI1+int(channel)))!=ajaFormat(format)) continue; }
+                      if(board->card.GetInputVideoFormat(NTV2InputSource(NTV2_INPUTSOURCE_SDI1+int(channel)),!format.interlaced)!=ajaFormat(format)) {std::lock_guard statsLock(mutex);++counters.noSignal;counters.audioPeak=-120.;continue;} }
                     if(audioSystem!=NTV2_AUDIOSYSTEM_INVALID) {
                         size_t samples=std::min<size_t>(transfer.acTransferStatus.GetCapturedAudioByteCount()/4/audioChannels,audio.size()/audioChannels);
                         frame->audio.resize(samples*2);
                         for(size_t i=0;i<samples;++i) { frame->audio[i*2]=audio[i*audioChannels];frame->audio[i*2+1]=audio[i*audioChannels+1]; }
                     }
                     frame->sequence=count++;frame->captured=std::chrono::steady_clock::now();callback(frame);
-                    std::lock_guard lock(mutex);++counters.frames;
+                    std::lock_guard lock(mutex);++counters.frames;counters.audioFrames+=frame->audio.size()/2;counters.audioPeak=audioPeakDb(frame->audio);
                 } else {
                     FramePtr frame;
                     if(status.CanAcceptMoreOutputFrames()) { std::lock_guard lock(mutex);if(!queue.empty()) { frame=queue.front();queue.pop_front(); } }
@@ -219,6 +241,8 @@ public:
     void stop() noexcept {
         running=false;if(worker.joinable()) worker.join();
         if(board&&initialized) { std::lock_guard lock(board->mutex);board->card.AutoCirculateStop(channel); }
+        if(board&&inputSubscribed) {std::lock_guard lock(board->mutex);board->card.UnsubscribeInputVerticalEvent(channel);}
+        inputSubscribed=false;
         initialized=false;board.reset();std::lock_guard lock(mutex);queue.clear();
     }
     IoStats stats() const { std::lock_guard lock(mutex);return counters; }

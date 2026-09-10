@@ -30,12 +30,23 @@ float3 pixel(int source,int2 p) {
     float y=((p.x&1)==0?c.y:c.w)-16, u=c.x-128,v=c.z-128;
     return saturate(float3(y/219+1.5748*v/224,y/219-.187324*u/224-.468124*v/224,y/219+1.8556*u/224));
 }
-float3 sampleSource(int source,float2 uv) {
-    if(sourceInfo[source].w<.5) return float3(.025,.03,.035);
+float3 bilinearSource(int source,float2 uv) {
     float2 p=saturate(uv)*sourceInfo[source].xy-.5;
     int2 q=int2(floor(p)); float2 f=frac(p);
     [branch] if(all(f<.001)) return pixel(source,q);
     return lerp(lerp(pixel(source,q),pixel(source,q+int2(1,0)),f.x),lerp(pixel(source,q+int2(0,1)),pixel(source,q+int2(1,1)),f.x),f.y);
+}
+float3 sampleSource(int source,float2 uv) {
+    if(sourceInfo[source].w<.5) return float3(.025,.03,.035);
+    // Low-pass only the small desktop monitors. UHD -> 480x270 is an 8:1
+    // reduction; a single bilinear sample aliases fine lines as the source moves.
+    [branch] if(options.w>.5) {
+        float2 dx=ddx(uv),dy=ddy(uv);float3 sum=0;
+        [loop] for(int y=0;y<4;++y) [loop] for(int x=0;x<4;++x)
+            sum+=bilinearSource(source,uv+((x+.5)/4-.5)*dx+((y+.5)/4-.5)*dy);
+        return sum/16;
+    }
+    return bilinearSource(source,uv);
 }
 float3 scene(Scene s,float2 uv) {
     float3 base=sampleSource(s.ids.x,uv);
@@ -201,6 +212,7 @@ GpuResult GpuCompositor::render(const std::array<FramePtr,4>& frames,const Rende
     ID3D11ShaderResourceView* inputViews[4];for(int i=0;i<4;++i) inputViews[i]=g.sources[i].resource.Get();
     g.context->PSSetShaderResources(0,4,inputViews);
     g.p.options[1]=float(tick%2);g.p.options[2]=g.format.interlaced?1.f:0.f;
+    g.p.options[3]=0;
     if(produceOutputs)for(int out=0;out<2;++out) {
         const bool mix=out==0&&state.transitioning;
         const auto& scene=out==0?state.program:state.preview;
@@ -231,6 +243,7 @@ GpuResult GpuCompositor::render(const std::array<FramePtr,4>& frames,const Rende
         g.previousState=state;++g.completed;
     }
     if(showMonitors) {
+      g.p.options[3]=1;
       for(int i=0;i<6;++i) {
         Scene scene;scene.background=i<4?i:0;
         bool mix=i==4&&state.transitioning;
