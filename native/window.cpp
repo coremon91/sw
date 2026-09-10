@@ -82,7 +82,7 @@ void Window::refreshDevices() {
     std::vector<std::string> warnings;devices_=receive?probeDeckLink(warnings):probeDevices(warnings);QSettings settings;
     for(int i=0;i<6;++i) {
         const auto old=ports_[i]->currentData().toString();ports_[i]->clear();ports_[i]->addItem(receive?(i<4?"사용 안 함":"출력 사용 안 함"):"포트 선택","");
-        for(const auto& e:devices_) if(!(receive&&i>=4)&&(i<4?e.input:e.output)) ports_[i]->addItem(QString::fromStdString(e.label)+ (e.uhd?" [HD/UHD]":" [HD]")+(receive&&e.detail.find("capture=busy")!=std::string::npos?" · 사용 중":""),QString::fromStdString(e.id));
+        for(const auto& e:devices_) if(!(receive&&i>=4)&&(i<4?e.input:e.output)) ports_[i]->addItem(QString(receive&&e.detail.find("capture=busy")!=std::string::npos?"사용 중 · ":"")+QString::fromStdString(e.label)+ (e.uhd?" [HD/UHD]":" [HD]"),QString::fromStdString(e.id));
         QString saved=old.isEmpty()?settings.value(QString(receive?"receivePort%1":"port%1").arg(i)).toString():old;
         ports_[i]->setCurrentIndex(std::max(0,ports_[i]->findData(saved)));
         ports_[i]->setEnabled(sourceMode_->currentIndex()==1||(receive&&i<4));
