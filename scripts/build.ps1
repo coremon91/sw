@@ -33,5 +33,6 @@ try {
     else { throw 'Qt license files missing. Run scripts/bootstrap.ps1 or provide QtRoot/LICENSES.' }
     Copy-Item -LiteralPath docs/03-implementation.ko.md -Destination dist/SW/사용안내.md
     Copy-Item -LiteralPath scripts/UHD-loopback.cmd -Destination dist/SW/
+    Copy-Item -LiteralPath scripts/DeckLink-receive.cmd -Destination dist/SW/
     Write-Host 'Ready: dist/SW/sw_switcher.exe (requires installed Visual C++ x64 runtime and card drivers).'
 } finally { Pop-Location }

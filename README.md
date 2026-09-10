@@ -10,6 +10,7 @@ Vizrt TriCaster의 제작 흐름을 참고하는 **Windows C++20 / Qt 6 / Direct
 - DeckLink SDI 캡처/예약 재생, AJA NTV2 AutoCirculate 캡처/재생.
 - 장치 검색, 포트 검증, 신호 소실 표시, 드롭·처리 시간 진단.
 - 테스트 패턴 모드와 실제 UHD SDI 프레임 마커 루프백 진단.
+- **DeckLink 수신 확인 모드**: 외부 4K 플레이어가 KONA로 출력하는 영상을 입력 1개부터 수신. KONA 점유·SDI 출력 없이 화면과 수신 프레임 수/fps 확인. `dist/SW/DeckLink-receive.cmd`로 설정 화면을 엽니다.
 
 입력 4개는 현재 세션 포맷과 일치해야 합니다. HD와 UHD를 동시에 출력하지 않습니다. 현재 픽셀 경로는 **8-bit UYVY / Rec.709 SDR**이며 10-bit와 방송용 동기화는 후속 작업입니다. 실제 장시간 운용 검증 완료 여부는 별도로 기록합니다.
 

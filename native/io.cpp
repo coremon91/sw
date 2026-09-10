@@ -35,4 +35,14 @@ void validateRouting(const std::array<Endpoint,4>& inputs,const std::array<Endpo
     for(const auto& e:inputs) check(e,true);
     for(const auto& e:outputs) check(e,false);
 }
+void validateReceiveRouting(const std::array<Endpoint,4>& inputs,Mode mode) {
+    std::set<std::string> used;
+    for(const auto& e:inputs) {
+        if(e.id.empty()) continue;
+        if(e.backend!="decklink"||!e.input) throw std::runtime_error("Receive-only mode accepts DeckLink inputs only; KONA belongs to the external player.");
+        if(!used.insert(e.id).second) throw std::runtime_error("The same DeckLink input cannot be assigned twice.");
+        if(!(mode==Mode::Uhd?e.uhd:e.hd)) throw std::runtime_error("Selected input does not support the session format.");
+    }
+    if(used.empty()) throw std::runtime_error("Select at least one DeckLink input.");
+}
 }

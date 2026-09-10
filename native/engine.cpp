@@ -8,8 +8,14 @@ namespace sw {
 Engine::~Engine() { stop(); }
 void Engine::start(Configuration config) {
     stop();
-    if(!config.synthetic) validateRouting(config.inputs,config.outputs,config.mode);
-    { std::lock_guard lock(mutex_); quit_=false;format_=Format::of(config.mode);switcher_.reset();snapshot_={};snapshot_.starting=true;snapshot_.synthetic=config.synthetic; }
+    if(config.receiveOnly) {
+        if(config.synthetic) throw std::runtime_error("Receive-only mode cannot use synthetic inputs.");
+        validateReceiveRouting(config.inputs,config.mode);
+    } else if(!config.synthetic) validateRouting(config.inputs,config.outputs,config.mode);
+    { std::lock_guard lock(mutex_); quit_=false;format_=Format::of(config.mode);switcher_.reset();snapshot_={};snapshot_.starting=true;snapshot_.synthetic=config.synthetic;snapshot_.receiveOnly=config.receiveOnly;
+      for(int i=0;i<4;++i)snapshot_.assigned[i]=config.synthetic||!config.inputs[i].id.empty();
+      if(config.receiveOnly)for(int i=0;i<4;++i)if(snapshot_.assigned[i]) {switcher_.preview(i);switcher_.cut();switcher_.preview(i);break;}
+      snapshot_.state=switcher_.state(); }
     worker_=std::thread([this,config] { run(config); });
 }
 void Engine::stop() {
@@ -37,22 +43,24 @@ void Engine::run(Configuration config) {
         GpuCompositor gpu;gpu.initialize(format,true);
         if(!config.synthetic) {
             for(int i=0;i<4;++i) {
+                if(config.receiveOnly&&config.inputs[i].id.empty()) continue;
                 inputs[i]=makeInput(config.inputs[i]);
                 inputs[i]->start(config.inputs[i],format,[&,i](FramePtr f) {
-                    { std::lock_guard lock(audioMutex);auto& q=audio[i];
+                    if(!config.receiveOnly) { std::lock_guard lock(audioMutex);auto& q=audio[i];
                       q.insert(q.end(),f->audio.begin(),f->audio.end());
                       // Keep at most 100 ms. An unlocked source may drift; expose underruns.
                       while(q.size()>9600) { q.pop_front();q.pop_front(); } }
                     mail[i].publish(std::move(f));
                 });
             }
-            for(int i=0;i<2;++i) { outputs[i]=makeOutput(config.outputs[i]);outputs[i]->start(config.outputs[i],format); }
+            if(!config.receiveOnly)for(int i=0;i<2;++i) { outputs[i]=makeOutput(config.outputs[i]);outputs[i]->start(config.outputs[i],format); }
         }
         { std::lock_guard lock(mutex_);snapshot_.starting=false;snapshot_.running=true;snapshot_.adapter=gpu.adapter(); }
         FramePool patterns{12};
         std::array<FramePtr,4> frames;
         uint64_t tick=0,overruns=0,audioUnderruns=0;
         auto base=std::chrono::steady_clock::now();
+        auto rateTime=base;std::array<uint64_t,4> previousCounts{};std::array<double,4> rates{};
         while(true) {
             RenderState state;bool muted;
             { std::lock_guard lock(mutex_);if(quit_) break;state=switcher_.state();muted=muted_; }
@@ -67,7 +75,8 @@ void Engine::run(Configuration config) {
             }
             const bool show=tick%4==0;
             const auto gpuBegin=std::chrono::steady_clock::now();
-            auto result=gpu.render(frames,state,tick,show);
+            GpuResult result;
+            if(!config.receiveOnly||show) result=gpu.render(frames,state,tick,show,!config.receiveOnly);
             const auto gpuEnd=std::chrono::steady_clock::now();
             if(result.output[0]) {
                 const auto count=audioSamples(result.output[0]->sequence,format);
@@ -99,11 +108,14 @@ void Engine::run(Configuration config) {
                 if(!stats[i].error.empty()) throw std::runtime_error(stats[i].error);
             }
             const auto end=std::chrono::steady_clock::now();
+            const double rateSeconds=std::chrono::duration<double>(end-rateTime).count();
+            if(rateSeconds>=1) {for(int i=0;i<4;++i) {rates[i]=double(stats[i].frames-previousCounts[i])/rateSeconds;previousCounts[i]=stats[i].frames;}rateTime=end;}
             auto next=base+tickTime(tick+1);
             if(end>next) { ++overruns;base+=end-next;next=end; }
             { std::unique_lock lock(mutex_);
               snapshot_.state=state;snapshot_.ticks=tick+1;snapshot_.overruns=overruns;snapshot_.audioUnderruns=audioUnderruns;
               snapshot_.renderMs=std::chrono::duration<double,std::milli>(end-begin).count();snapshot_.io=stats;
+              snapshot_.inputFps=rates;
               snapshot_.sourceMs=std::chrono::duration<double,std::milli>(gpuBegin-begin).count();snapshot_.gpuMs=std::chrono::duration<double,std::milli>(gpuEnd-gpuBegin).count();
               for(int i=0;i<4;++i) snapshot_.signal[i]=frames[i]&&end-frames[i]->captured<std::chrono::milliseconds(500);
               if(show) snapshot_.monitors=std::move(result.monitors);

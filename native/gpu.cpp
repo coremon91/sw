@@ -179,7 +179,7 @@ void GpuCompositor::initialize(Format format,bool pipelined) {
     g.context->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
     g.context->VSSetShader(g.vs.Get(),nullptr,0);
 }
-GpuResult GpuCompositor::render(const std::array<FramePtr,4>& frames,const RenderState& state,uint64_t tick,bool showMonitors) {
+GpuResult GpuCompositor::render(const std::array<FramePtr,4>& frames,const RenderState& state,uint64_t tick,bool showMonitors,bool produceOutputs) {
     auto& g=*impl_;GpuResult result;
     const int field=g.format.interlaced?int(tick%2):0;
     // Hold one captured interlaced frame over both output fields.
@@ -201,7 +201,7 @@ GpuResult GpuCompositor::render(const std::array<FramePtr,4>& frames,const Rende
     ID3D11ShaderResourceView* inputViews[4];for(int i=0;i<4;++i) inputViews[i]=g.sources[i].resource.Get();
     g.context->PSSetShaderResources(0,4,inputViews);
     g.p.options[1]=float(tick%2);g.p.options[2]=g.format.interlaced?1.f:0.f;
-    for(int out=0;out<2;++out) {
+    if(produceOutputs)for(int out=0;out<2;++out) {
         const bool mix=out==0&&state.transitioning;
         const auto& scene=out==0?state.program:state.preview;
         g.p.a=params(mix?state.transitionFrom:scene);g.p.b=params(mix?state.transitionTo:scene);g.p.options[0]=mix?state.mix:0;
@@ -218,7 +218,7 @@ GpuResult GpuCompositor::render(const std::array<FramePtr,4>& frames,const Rende
         }
     }
     result.outputState=state;
-    if(g.pipelined&&(!g.format.interlaced||field==1)) {
+    if(produceOutputs&&g.pipelined&&(!g.format.interlaced||field==1)) {
         g.context->Flush();
         if(g.completed>0) {
             for(int out=0;out<2;++out) {

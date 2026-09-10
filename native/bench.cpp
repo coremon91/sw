@@ -7,9 +7,23 @@ static void require(bool b,const char* message) { if(!b)throw std::runtime_error
 static uint8_t luma(sw::FramePtr f,int x,int y) { return f->data[size_t(y)*f->stride+x*2+1]; }
 int main(int argc,char** argv) {
     try {
-        bool uhd=false,engineTest=false;
-        for(int i=1;i<argc;++i) { uhd|=std::string(argv[i])=="--uhd";engineTest|=std::string(argv[i])=="--engine"; }
+        bool uhd=false,engineTest=false,receiveTest=false;
+        for(int i=1;i<argc;++i) { uhd|=std::string(argv[i])=="--uhd";engineTest|=std::string(argv[i])=="--engine";receiveTest|=std::string(argv[i])=="--receive"; }
         auto format=sw::Format::of(uhd?sw::Mode::Uhd:sw::Mode::Hd);
+        if(receiveTest) {
+            std::vector<std::string> warnings;auto ports=sw::probeDeckLink(warnings);
+            for(const auto& warning:warnings)std::cerr<<warning<<'\n';
+            for(const auto& p:ports)std::cerr<<p.id<<": "<<p.detail<<'\n';
+            auto port=std::find_if(ports.begin(),ports.end(),[](const sw::Endpoint& e){return e.input;});require(port!=ports.end(),"No DeckLink input detected");
+            sw::Configuration config;config.synthetic=false;config.receiveOnly=true;config.mode=uhd?sw::Mode::Uhd:sw::Mode::Hd;config.inputs[0]=*port;
+            // Invalid output backends deliberately detect any accidental attempt to open an output.
+            config.outputs[0].backend=config.outputs[1].backend="must-not-open";
+            sw::Engine engine;engine.start(config);std::this_thread::sleep_for(std::chrono::seconds(5));auto state=engine.snapshot();engine.stop();
+            require(state.running&&state.error.empty(),state.error.empty()?"Receiver failed to start":state.error.c_str());
+            require(!state.monitors[0].rgba.empty(),"Receiver must display a monitor even without a signal");
+            require(!engine.snapshot().running,"Receiver failed to stop");
+            std::cout<<"{\"receive_only_start_stop\":\"passed\",\"endpoint\":\""<<port->id<<"\",\"mode\":\""<<format.label()<<"\",\"valid_frames\":"<<state.io[0].frames<<",\"receive_fps\":"<<state.inputFps[0]<<",\"signal\":"<<(state.signal[0]?"true":"false")<<",\"physical_outputs_opened\":0}\n";return 0;
+        }
         if(engineTest) {
             sw::Engine engine;sw::Configuration config;config.mode=uhd?sw::Mode::Uhd:sw::Mode::Hd;engine.start(config);
             std::this_thread::sleep_for(std::chrono::seconds(2));auto a=engine.snapshot();require(a.running,a.error.empty()?"Engine failed to start":a.error.c_str());
@@ -54,6 +68,9 @@ int main(int argc,char** argv) {
             require(b.output[0]&&c.output[0]&&b.output[0]->sequence==0&&c.output[0]->sequence==1,"Pipelined output sequence incorrect");
             require(b.outputState.program.background==0&&c.outputState.program.background==1,"Delayed audio scene must match delayed video");
             require(std::abs(int(luma(b.output[0],100,100))-int(luma(c.output[0],100,100)))>10,"Pipelined CUT must change video on the next complete frame");
+            auto monitorOnly=delayed.render(frames,routing.state(),4*format.ticksPerFrame(),true,false);
+            require(!monitorOnly.output[0]&&!monitorOnly.output[1],"Receive monitor mode must not produce output buffers");
+            require(!monitorOnly.monitors[0].rgba.empty()&&!monitorOnly.monitors[4].rgba.empty(),"Receive monitor mode must still display input and local PGM");
         }
         const int ticks=120;double worst=0,total=0;int late=0;
         for(int t=0;t<ticks;++t) {

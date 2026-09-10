@@ -55,7 +55,9 @@ std::vector<Endpoint> probeDeckLink(std::vector<std::string>& warnings) {
             // Capability is checked again for the selected direction immediately before starting.
             bool hd=(cap&&supports(input.Get(),Format::of(Mode::Hd)))||(play&&supports(output.Get(),Format::of(Mode::Hd)));
             bool uhd=(cap&&supports(input.Get(),Format::of(Mode::Uhd)))||(play&&supports(output.Get(),Format::of(Mode::Uhd)));
-            result.push_back({"decklink:"+std::to_string(i),label,"decklink","subdevices="+std::to_string(sub)+"; duplex="+std::to_string(duplex),i,0,cap,play,uhd,hd});
+            ComPtr<bmd::IDeckLinkStatus> status;__int64 busy=0;std::string detail="subdevices="+std::to_string(sub)+"; duplex="+std::to_string(duplex);
+            if(SUCCEEDED(cards[i].As(&status))&&SUCCEEDED(status->GetInt(bmd::bmdDeckLinkStatusBusy,&busy)))detail+="; capture="+std::string(busy&bmd::bmdDeviceCaptureBusy?"busy":"idle");
+            result.push_back({"decklink:"+std::to_string(i),label,"decklink",detail,i,0,cap,play,uhd,hd});
         }
     } catch(const std::exception& e) { warnings.push_back(e.what()); }
     return result;
@@ -78,6 +80,7 @@ class DeckInput final:public Input,public bmd::IDeckLinkInputCallback {
     ComPtr<bmd::IDeckLinkConfiguration> config;
     __int64 oldConnection=0;
     bool restoreConnection=false;
+    bool videoEnabled=false,audioEnabled=false,callbackSet=false;
     std::atomic<ULONG> refs=1;
     std::atomic<bool> active=false;
     FramePool pool{6};FrameCallback callback;Format format;
@@ -93,6 +96,10 @@ public:
     void start(const Endpoint& e,Format f,FrameCallback cb) override {
         stop();format=f;callback=std::move(cb);counters={};
         auto card=select(e.device);bcheck(card.As(&input),"get input interface");
+        ComPtr<bmd::IDeckLinkStatus> status;__int64 busy=0;
+        if(SUCCEEDED(card.As(&status))&&SUCCEEDED(status->GetInt(bmd::bmdDeckLinkStatusBusy,&busy))&&(busy&bmd::bmdDeviceCaptureBusy)) {
+            input.Reset();throw std::runtime_error("DeckLink input is already capturing. Stop the capture in the other application or SW window first.");
+        }
         if(!supports(input.Get(),f)) { input.Reset();throw std::runtime_error("Selected DeckLink SDI input mode is unsupported in the current profile."); }
         try {
             if(SUCCEEDED(card.As(&config))) {
@@ -100,13 +107,17 @@ public:
                 bcheck(config->SetInt(bmd::bmdDeckLinkConfigVideoInputConnection,bmd::bmdVideoConnectionSDI),"select SDI input");
             }
             bcheck(input->SetCallback(this),"set capture callback");
+            callbackSet=true;
             bcheck(input->EnableVideoInput(bmode(f),bmd::bmdFormat8BitYUV,bmd::bmdVideoInputFlagDefault),"enable video input");
+            videoEnabled=true;
             bcheck(input->EnableAudioInput(bmd::bmdAudioSampleRate48kHz,bmd::bmdAudioSampleType32bitInteger,2),"enable stereo audio input");
+            audioEnabled=true;
             active=true;bcheck(input->StartStreams(),"start input streams");
         } catch(...) { stop();throw; }
     }
     void stop() noexcept override {
-        active=false;if(input) { input->StopStreams();input->SetCallback(nullptr);input->DisableVideoInput();input->DisableAudioInput(); }
+        active=false;if(input) { if(videoEnabled)input->StopStreams();if(callbackSet)input->SetCallback(nullptr);if(videoEnabled)input->DisableVideoInput();if(audioEnabled)input->DisableAudioInput(); }
+        videoEnabled=audioEnabled=callbackSet=false;
         if(config&&restoreConnection) config->SetInt(bmd::bmdDeckLinkConfigVideoInputConnection,oldConnection);
         restoreConnection=false;config.Reset();input.Reset();
     }

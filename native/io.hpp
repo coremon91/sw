@@ -38,4 +38,5 @@ std::unique_ptr<Input> ajaInput();
 std::unique_ptr<Output> ajaOutput();
 #endif
 void validateRouting(const std::array<Endpoint,4>&,const std::array<Endpoint,2>&,Mode);
+void validateReceiveRouting(const std::array<Endpoint,4>&,Mode);
 }

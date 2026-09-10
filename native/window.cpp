@@ -28,7 +28,7 @@ void Monitor::paintEvent(QPaintEvent*) {
     p.setPen(accent_);p.drawRect(rect().adjusted(1,1,-2,-2));p.fillRect(2,2,width()-4,27,accent_.darker(240));
     p.setFont(QFont("Segoe UI",9,QFont::DemiBold));p.drawText(12,21,title_);p.drawText(QRect(65,3,width()-76,26),Qt::AlignRight|Qt::AlignVCenter,status_);
 }
-Window::Window() {
+Window::Window(bool receiver) {
     setWindowTitle("SW 0.1 — Software Video Switcher");resize(1480,940);
     setStyleSheet(R"(QMainWindow,QWidget{background:#111820;color:#dce3ec;font-family:'Segoe UI';font-size:12px;}QGroupBox{border:1px solid #303e4e;border-radius:6px;margin-top:18px;padding:10px;}QGroupBox::title{subcontrol-origin:margin;left:10px;color:#8fa3b9;}QPushButton{background:#263444;border:1px solid #3d5064;padding:9px 14px;border-radius:4px;font-weight:600;}QPushButton:hover{background:#354960;}QPushButton:disabled{color:#627084;background:#1a242f;}QComboBox,QSpinBox,QDoubleSpinBox{background:#1b2835;border:1px solid #3d5064;border-radius:3px;padding:5px;}QLabel#headline{font-size:23px;font-weight:700;}QCheckBox{spacing:8px;}QScrollArea{border:0;})");
     auto* scroll=new QScrollArea;scroll->setWidgetResizable(true);setCentralWidget(scroll);
@@ -53,10 +53,11 @@ Window::Window() {
     auto* autoKey=new QShortcut(QKeySequence(Qt::Key_Return),this);connect(autoKey,&QShortcut::activated,auto_,&QPushButton::click);
     auto* lower=new QHBoxLayout;
     auto* sessionBox=new QGroupBox("SESSION / SDI ROUTING");auto* sl=new QVBoxLayout(sessionBox);session_=new QWidget;auto* grid=new QGridLayout(session_);grid->setContentsMargins(0,0,0,0);
-    mode_=new QComboBox;mode_->addItems({"HD · 1080i29.97 (59.94 fields)","UHD · 2160p59.94"});sourceMode_=new QComboBox;sourceMode_->addItems({"테스트 패턴 · SDI 사용 안 함","실제 SDI · 4 IN / PGM + PVW"});
+    mode_=new QComboBox;mode_->addItems({"HD · 1080i29.97 (59.94 fields)","UHD · 2160p59.94"});sourceMode_=new QComboBox;sourceMode_->addItems({"테스트 패턴 · SDI 사용 안 함","실제 SDI · 4 IN / PGM + PVW","DeckLink 수신 확인 · 출력 없음"});
+    if(receiver)sourceMode_->setCurrentIndex(2);
     grid->addWidget(sourceMode_,0,0,1,2);grid->addWidget(mode_,0,2,1,2);
     for(int i=0;i<6;++i) { ports_[i]=new QComboBox;ports_[i]->setMinimumWidth(180);ports_[i]->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon);grid->addWidget(new QLabel(i<4?QString("IN %1").arg(i+1):(i==4?"OUT 1 / PGM":"OUT 2 / PVW")),1+i/2,(i%2)*2);grid->addWidget(ports_[i],1+i/2,(i%2)*2+1); }
-    refresh_=new QPushButton("장치 다시 검색");grid->addWidget(refresh_,4,0,1,2);grid->addWidget(new QLabel("입력 4개의 포맷을 세션과 일치시키세요."),4,2,1,2);sl->addWidget(session_);
+    refresh_=new QPushButton("장치 다시 검색");grid->addWidget(refresh_,4,0,1,2);routingHint_=new QLabel; routingHint_->setWordWrap(true);grid->addWidget(routingHint_,4,2,1,2);sl->addWidget(session_);
     auto* actions=new QHBoxLayout;start_=new QPushButton("세션 시작");start_->setStyleSheet("background:#216455;border-color:#35947d;");stop_=new QPushButton("정지");actions->addWidget(start_);actions->addWidget(stop_);sl->addLayout(actions);
     hardware_=new QLabel;hardware_->setWordWrap(true);hardware_->setStyleSheet("color:#8fa3b9;font-size:11px;");sl->addWidget(hardware_);lower->addWidget(sessionBox,3);
     auto* dveBox=new QGroupBox("DVE / PICTURE IN PICTURE");dvePanel_=dveBox;auto* dg=new QGridLayout(dveBox);
@@ -66,8 +67,8 @@ Window::Window() {
     connect(dveEnabled_,&QCheckBox::toggled,this,[this]{applyDve();});connect(dveSource_,qOverload<int>(&QComboBox::currentIndexChanged),this,[this]{applyDve();});lower->addWidget(dveBox,2);layout->addLayout(lower);
     status_=new QLabel("준비 · 세션을 시작하면 영상이 표시됩니다.");status_->setWordWrap(true);layout->addWidget(status_);
     connect(refresh_,&QPushButton::clicked,this,[this]{refreshDevices();});connect(start_,&QPushButton::clicked,this,[this]{startSession();});connect(stop_,&QPushButton::clicked,this,[this]{engine_.stop();update();});
-    connect(sourceMode_,qOverload<int>(&QComboBox::currentIndexChanged),this,[this](int index){for(auto* p:ports_)p->setEnabled(index==1);});
-    QSettings settings;mode_->setCurrentIndex(settings.value("mode",0).toInt());refreshDevices();for(auto* p:ports_)p->setEnabled(false);
+    connect(sourceMode_,qOverload<int>(&QComboBox::currentIndexChanged),this,[this]{refreshDevices();});
+    QSettings settings;mode_->setCurrentIndex(receiver?1:settings.value("mode",0).toInt());refreshDevices();
     connect(qApp,&QApplication::focusChanged,this,[this](QWidget*,QWidget* focused) {
         bool editing=false;
         for(auto* p=focused;p;p=p->parentWidget()) if(qobject_cast<QLineEdit*>(p)||qobject_cast<QAbstractSpinBox*>(p)||qobject_cast<QComboBox*>(p)) {editing=true;break;}
@@ -77,24 +78,31 @@ Window::Window() {
 }
 Window::~Window() { engine_.stop(); }
 void Window::refreshDevices() {
-    std::vector<std::string> warnings;devices_=probeDevices(warnings);QSettings settings;
+    const bool receive=sourceMode_->currentIndex()==2;
+    std::vector<std::string> warnings;devices_=receive?probeDeckLink(warnings):probeDevices(warnings);QSettings settings;
     for(int i=0;i<6;++i) {
-        const auto old=ports_[i]->currentData().toString();ports_[i]->clear();ports_[i]->addItem("포트 선택","");
-        for(const auto& e:devices_) if(i<4?e.input:e.output) ports_[i]->addItem(QString::fromStdString(e.label)+ (e.uhd?" [HD/UHD]":" [HD]"),QString::fromStdString(e.id));
-        QString saved=old.isEmpty()?settings.value(QString("port%1").arg(i)).toString():old;
+        const auto old=ports_[i]->currentData().toString();ports_[i]->clear();ports_[i]->addItem(receive?(i<4?"사용 안 함":"출력 사용 안 함"):"포트 선택","");
+        for(const auto& e:devices_) if(!(receive&&i>=4)&&(i<4?e.input:e.output)) ports_[i]->addItem(QString::fromStdString(e.label)+ (e.uhd?" [HD/UHD]":" [HD]")+(receive&&e.detail.find("capture=busy")!=std::string::npos?" · 사용 중":""),QString::fromStdString(e.id));
+        QString saved=old.isEmpty()?settings.value(QString(receive?"receivePort%1":"port%1").arg(i)).toString():old;
         ports_[i]->setCurrentIndex(std::max(0,ports_[i]->findData(saved)));
+        ports_[i]->setEnabled(sourceMode_->currentIndex()==1||(receive&&i<4));
     }
+    if(receive&&std::all_of(ports_.begin(),ports_.begin()+4,[](QComboBox* p){return p->currentIndex()==0;})&&ports_[0]->count()>1)ports_[0]->setCurrentIndex(1);
+    routingHint_->setText(receive?"4K 플레이어 → KONA SDI → DeckLink\n입력 1개부터 가능 · 세션 포맷과 일치":"입력 4개의 포맷을 세션과 일치시키세요.");
     QString text=QString("사용 가능한 채널 %1개. 포트는 중복 지정할 수 없습니다.").arg(devices_.size());for(auto& w:warnings) text+="\n"+QString::fromStdString(w);
     for(const auto& e:devices_) if(e.backend=="aja") { text+="\nAJA: "+QString::fromStdString(e.detail);break; }
     hardware_->setText(text);
+    if(receive)hardware_->setText(text+"\nKONA는 외부 플레이어가 사용합니다. 스위처는 DeckLink 입력만 엽니다.");
 }
 void Window::startSession() {
     try {
-        Configuration c;c.mode=mode_->currentIndex()?Mode::Uhd:Mode::Hd;c.synthetic=sourceMode_->currentIndex()==0;QSettings settings;settings.setValue("mode",mode_->currentIndex());
-        if(!c.synthetic) for(int i=0;i<6;++i) {
+        Configuration c;c.mode=mode_->currentIndex()?Mode::Uhd:Mode::Hd;c.synthetic=sourceMode_->currentIndex()==0;c.receiveOnly=sourceMode_->currentIndex()==2;QSettings settings;settings.setValue("mode",mode_->currentIndex());
+        if(!c.synthetic) for(int i=0;i<(c.receiveOnly?4:6);++i) {
             auto id=ports_[i]->currentData().toString();auto e=std::find_if(devices_.begin(),devices_.end(),[&](const Endpoint& p){return p.id==id.toStdString();});
+            settings.setValue(QString(c.receiveOnly?"receivePort%1":"port%1").arg(i),id);
+            if(c.receiveOnly&&id.isEmpty())continue;
             if(e==devices_.end()) throw std::runtime_error("Select all four inputs and both output ports before starting SDI.");
-            if(i<4)c.inputs[i]=*e;else c.outputs[i-4]=*e;settings.setValue(QString("port%1").arg(i),id);
+            if(i<4)c.inputs[i]=*e;else c.outputs[i-4]=*e;
         }
         engine_.setMuted(mute_->isChecked());engine_.start(c);update();
     } catch(const std::exception& e) { QMessageBox::warning(this,"SW · 세션 시작 실패",QString::fromUtf8(e.what())); }
@@ -107,8 +115,14 @@ void Window::applyDve() {
 }
 void Window::update() {
     auto s=engine_.snapshot();const bool busy=s.running||s.starting;session_->setEnabled(!busy);start_->setEnabled(!busy);stop_->setEnabled(busy);cut_->setEnabled(s.running&&!s.state.transitioning);auto_->setEnabled(cut_->isEnabled());dvePanel_->setEnabled(s.running&&!s.state.transitioning);
+    mute_->setEnabled(sourceMode_->currentIndex()!=2);
     for(int i=0;i<6;++i) {
         bool valid=i<4?s.signal[i]:s.running;QString label=!busy?"STOPPED":(!valid?"NO SIGNAL":(s.synthetic?"TEST":(i==4?"SDI PGM":i==5?"SDI PVW":"SDI")));
+        if(busy&&s.receiveOnly) {
+            if(i>=4)label="LOCAL · 출력 없음";
+            else if(!s.assigned[i])label="NOT ASSIGNED";
+            else if(s.signal[i])label=QString("%1 fps · %2 frames").arg(s.inputFps[i],0,'f',1).arg(s.io[i].frames);
+        }
         QColor color=i==4?QColor("#ed6a73"):i==5?QColor("#4ed2a0"):QColor("#69809b");monitors_[i]->updateImage(s.monitors[i],label,color);
     }
     for(int i=0;i<4;++i) { previewButtons_[i]->setEnabled(s.running&&!s.state.transitioning);previewButtons_[i]->setStyleSheet(i==s.state.preview.background?"background:#216455;border-color:#4ed2a0;":""); }
@@ -117,7 +131,11 @@ void Window::update() {
     for(int i=0;i<11;++i) if(!dveValues_[i]->hasFocus()) dveValues_[i]->setValue(values[i]);syncing_=false;
     uint64_t dropped=0;for(auto& io:s.io)dropped+=io.dropped;
     QString status=s.starting?"장치와 GPU 초기화 중…":s.running?(s.synthetic?"테스트 패턴 실행 중 · SDI 출력 없음":"SDI 세션 실행 중"):"정지 · 마지막 수신 화면 유지";
-    status+=QString("  |  %1 ms  ·  처리 지연 %2  ·  I/O 드롭 %3  ·  오디오 부족 %4").arg(s.renderMs,0,'f',1).arg(s.overruns).arg(dropped).arg(s.audioUnderruns);
+    if(s.running&&s.receiveOnly) {
+        uint64_t frames=0;for(int i=0;i<4;++i)frames+=s.io[i].frames;
+        status=QString("DeckLink 수신 확인 · %1 · 유효 수신 %2 frames · SDI 출력 없음 · 화면 갱신 약 15fps").arg(QString::fromStdString(Format::of(mode_->currentIndex()?Mode::Uhd:Mode::Hd).label())).arg(frames);
+    }
+    if(!s.receiveOnly)status+=QString("  |  %1 ms  ·  처리 지연 %2  ·  I/O 드롭 %3  ·  오디오 부족 %4").arg(s.renderMs,0,'f',1).arg(s.overruns).arg(dropped).arg(s.audioUnderruns);
     if(!s.adapter.empty())status+="  |  "+QString::fromStdString(s.adapter);
     if(!s.error.empty())status="세션 오류: "+QString::fromStdString(s.error);
     status_->setText(status);status_->setStyleSheet(s.error.empty()?"color:#93a5b8;":"color:#ff929a;");

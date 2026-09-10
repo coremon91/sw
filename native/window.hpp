@@ -22,7 +22,7 @@ private:
 };
 class Window:public QMainWindow {
 public:
-    Window();
+    explicit Window(bool receiver=false);
     ~Window() override;
     void startDemo();
     bool savePreview(const QString&);
@@ -39,6 +39,7 @@ private:
     std::array<QDoubleSpinBox*,11> dveValues_{};
     QLabel *status_,*hardware_;
     QWidget *session_,*dvePanel_;
+    QLabel* routingHint_;
     std::vector<Endpoint> devices_;
     bool syncing_=false;
     void refreshDevices();

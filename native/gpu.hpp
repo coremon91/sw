@@ -8,7 +8,7 @@ public:
     GpuCompositor();
     ~GpuCompositor();
     void initialize(Format,bool pipelined=false);
-    GpuResult render(const std::array<FramePtr,4>&,const RenderState&,uint64_t tick,bool monitors);
+    GpuResult render(const std::array<FramePtr,4>&,const RenderState&,uint64_t tick,bool monitors,bool produceOutputs=true);
     std::string adapter() const;
 private:
     struct Impl;

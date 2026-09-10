@@ -8,11 +8,15 @@ namespace sw {
 struct Configuration {
     Mode mode=Mode::Hd;
     bool synthetic=true;
+    bool receiveOnly=false;
     std::array<Endpoint,4> inputs;
     std::array<Endpoint,2> outputs;
 };
 struct Snapshot {
     bool running=false, starting=false, synthetic=true;
+    bool receiveOnly=false;
+    std::array<bool,4> assigned{};
+    std::array<double,4> inputFps{};
     RenderState state;
     std::array<Image,6> monitors;
     std::array<bool,4> signal{};
