@@ -1,6 +1,7 @@
 #pragma once
 #include "gpu.hpp"
 #include "io.hpp"
+#include "media.hpp"
 #include <condition_variable>
 #include <deque>
 #include <thread>
@@ -10,10 +11,13 @@ struct Configuration {
     bool synthetic=true;
     bool receiveOnly=false;
     std::string receiveBackend="decklink";
+    std::string mediaPath;
+    bool mediaLoop=false;
     std::array<Endpoint,4> inputs;
     std::array<Endpoint,2> outputs;
 };
 struct Snapshot {
+    MediaStatus media;
     bool running=false, starting=false, synthetic=true;
     bool receiveOnly=false;
     std::array<bool,4> assigned{};
@@ -44,7 +48,9 @@ public:
     void cut();
     void autoMix(unsigned frames);
     void setMuted(bool);
+    MediaPlayer& player(){return player_;}
 private:
+    MediaPlayer player_;
     void run(Configuration);
     mutable std::mutex mutex_;
     std::condition_variable wake_;

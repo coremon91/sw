@@ -207,7 +207,7 @@ GpuResult GpuCompositor::render(const std::array<FramePtr,4>& frames,const Rende
         const auto& f=g.held[i];
         g.p.sourceInfo[i][0]=float(f?f->format.width:1920);g.p.sourceInfo[i][1]=float(f?f->format.height:1080);
         g.p.sourceInfo[i][2]=f&&f->format.interlaced?1.f:0.f;
-        g.p.sourceInfo[i][3]=f&&std::chrono::steady_clock::now()-f->captured<std::chrono::milliseconds(500)?1.f:0.f;
+        g.p.sourceInfo[i][3]=f&&(f->persistent||std::chrono::steady_clock::now()-f->captured<std::chrono::milliseconds(500))?1.f:0.f;
     }
     ID3D11ShaderResourceView* inputViews[4];for(int i=0;i<4;++i) inputViews[i]=g.sources[i].resource.Get();
     g.context->PSSetShaderResources(0,4,inputViews);

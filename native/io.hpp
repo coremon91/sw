@@ -15,6 +15,7 @@ struct IoStats {
     uint32_t bufferedAudioFrames=0;
     double audioPeak=-120.;
 };
+inline Endpoint mediaEndpoint(){return {"media:4","Internal player / IN 4","media","",0,0,true,false,true,true};}
 using FrameCallback=std::function<void(FramePtr)>;
 class Input {
 public:

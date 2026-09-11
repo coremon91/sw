@@ -19,6 +19,8 @@
 #include <QJsonArray>
 #include <QSaveFile>
 #include <QDateTime>
+#include <QFileDialog>
+#include <QFileInfo>
 namespace sw {
 Monitor::Monitor(QString title,QWidget* parent):QWidget(parent),title_(std::move(title)) { setMinimumSize(180,125);setSizePolicy(QSizePolicy::Expanding,QSizePolicy::Expanding); }
 void Monitor::updateImage(const Image& i,QString status,QColor accent,bool newImage) {
@@ -60,6 +62,17 @@ Window::Window(int receiver) {
     connect(cut_,&QPushButton::clicked,this,[this]{engine_.cut();});connect(auto_,&QPushButton::clicked,this,[this]{engine_.autoMix(duration_->value());});connect(mute_,&QCheckBox::toggled,this,[this](bool m){engine_.setMuted(m);});
     auto* cutKey=new QShortcut(QKeySequence(Qt::Key_Space),this);connect(cutKey,&QShortcut::activated,cut_,&QPushButton::click);
     auto* autoKey=new QShortcut(QKeySequence(Qt::Key_Return),this);connect(autoKey,&QShortcut::activated,auto_,&QPushButton::click);
+    auto* playerBox=new QGroupBox("PLAYER / INPUT 4");auto* playerLayout=new QVBoxLayout(playerBox);auto* fileRow=new QHBoxLayout;
+    mediaEnabled_=new QCheckBox("INPUT 4 · 내장 플레이어");mediaFile_=new QLineEdit;mediaFile_->setReadOnly(true);mediaFile_->setPlaceholderText("세션과 같은 포맷의 영상 파일을 선택하세요");mediaBrowse_=new QPushButton("파일 열기");
+    fileRow->addWidget(mediaEnabled_);fileRow->addWidget(mediaFile_,1);fileRow->addWidget(mediaBrowse_);playerLayout->addLayout(fileRow);
+    auto* transport=new QHBoxLayout;mediaCue_=new QPushButton("CUE / 처음");mediaPlay_=new QPushButton("재생");mediaPause_=new QPushButton("일시정지");mediaLoop_=new QCheckBox("반복");mediaSeek_=new QSlider(Qt::Horizontal);mediaSeek_->setRange(0,10000);
+    transport->addWidget(mediaCue_);transport->addWidget(mediaPlay_);transport->addWidget(mediaPause_);transport->addWidget(mediaLoop_);transport->addWidget(mediaSeek_,1);playerLayout->addLayout(transport);
+    mediaStatus_=new QLabel("파일 선택 → 세션 시작 → CUE 확인 → 재생 · INPUT 4를 PVW/PGM으로 선택");mediaStatus_->setFixedHeight(mediaStatus_->fontMetrics().lineSpacing()+6);mediaStatus_->setSizePolicy(QSizePolicy::Ignored,QSizePolicy::Fixed);playerLayout->addWidget(mediaStatus_);layout->addWidget(playerBox);
+    connect(mediaBrowse_,&QPushButton::clicked,this,[this]{const auto path=QFileDialog::getOpenFileName(this,"플레이어 영상 선택",mediaFile_->text(),"영상 (*.mxf *.mov *.mp4 *.mkv *.avi *.ts *.m2ts);;모든 파일 (*)");if(!path.isEmpty()){mediaFile_->setText(path);mediaFile_->setToolTip(path);mediaEnabled_->setChecked(true);}});
+    connect(mediaEnabled_,&QCheckBox::toggled,this,[this]{refreshDevices();});
+    connect(mediaCue_,&QPushButton::clicked,this,[this]{engine_.player().cue();});connect(mediaPlay_,&QPushButton::clicked,this,[this]{engine_.player().play();});connect(mediaPause_,&QPushButton::clicked,this,[this]{engine_.player().pause();});
+    connect(mediaLoop_,&QCheckBox::toggled,this,[this](bool b){engine_.player().setLoop(b);});
+    connect(mediaSeek_,&QSlider::sliderReleased,this,[this]{engine_.player().seek(engine_.player().status().duration*mediaSeek_->value()/10000.);});
     auto* lower=new QHBoxLayout;
     auto* sessionBox=new QGroupBox("SESSION / SDI ROUTING");auto* sl=new QVBoxLayout(sessionBox);session_=new QWidget;auto* grid=new QGridLayout(session_);grid->setContentsMargins(0,0,0,0);
     mode_=new QComboBox;mode_->addItems({"HD · 1080i29.97 (59.94 fields)","UHD · 2160p59.94"});sourceMode_=new QComboBox;sourceMode_->addItems({"테스트 패턴 · SDI 사용 안 함","실제 SDI · 4 IN / PGM + PVW","DeckLink 수신 확인 · 출력 없음","KONA 5 수신 확인 · 출력 없음"});
@@ -80,7 +93,7 @@ Window::Window(int receiver) {
     status_->setSizePolicy(QSizePolicy::Ignored,QSizePolicy::Fixed);
     connect(refresh_,&QPushButton::clicked,this,[this]{refreshDevices();});connect(start_,&QPushButton::clicked,this,[this]{startSession();});connect(stop_,&QPushButton::clicked,this,[this]{engine_.stop();update();});
     connect(sourceMode_,qOverload<int>(&QComboBox::currentIndexChanged),this,[this]{refreshDevices();});
-    QSettings settings;mode_->setCurrentIndex(receiver?1:settings.value("mode",0).toInt());refreshDevices();
+    QSettings settings;mediaFile_->setText(settings.value("mediaFile").toString());mediaLoop_->setChecked(settings.value("mediaLoop",false).toBool());mode_->setCurrentIndex(receiver?1:settings.value("mode",0).toInt());refreshDevices();
     connect(qApp,&QApplication::focusChanged,this,[this](QWidget*,QWidget* focused) {
         bool editing=false;
         for(auto* p=focused;p;p=p->parentWidget()) if(qobject_cast<QLineEdit*>(p)||qobject_cast<QAbstractSpinBox*>(p)||qobject_cast<QComboBox*>(p)) {editing=true;break;}
@@ -97,7 +110,7 @@ void Window::refreshDevices() {
         for(const auto& e:devices_) if(!(receive&&i>=4)&&(i<4?e.input:e.output)) ports_[i]->addItem(QString(receive&&e.detail.find("capture=busy")!=std::string::npos?"사용 중 · ":"")+QString::fromStdString(e.label)+ (e.uhd?" [HD/UHD]":" [HD]"),QString::fromStdString(e.id));
         QString saved=ports_[i]->findData(old)>0?old:settings.value(QString(receive?(aja?"ajaReceivePort%1":"receivePort%1"):"port%1").arg(i)).toString();
         ports_[i]->setCurrentIndex(std::max(0,ports_[i]->findData(saved)));
-        ports_[i]->setEnabled(sourceMode_->currentIndex()==1||(receive&&i<4));
+        ports_[i]->setEnabled((sourceMode_->currentIndex()==1||(receive&&i<4))&&!(i==3&&!receive&&mediaEnabled_->isChecked()));
     }
     if(receive&&std::all_of(ports_.begin(),ports_.begin()+4,[](QComboBox* p){return p->currentIndex()==0;})&&ports_[0]->count()>1)ports_[0]->setCurrentIndex(1);
     routingHint_->setText(receive?(aja?"외부 플레이어 → DeckLink SDI → KONA\n입력 1개부터 가능 · 세션 포맷과 일치":"4K 플레이어 → KONA SDI → DeckLink\n입력 1개부터 가능 · 세션 포맷과 일치"):"입력 4개의 포맷을 세션과 일치시키세요.");
@@ -106,11 +119,18 @@ void Window::refreshDevices() {
     hardware_->setText(text);
     if(receive)hardware_->setText(text+(aja?"\nKONA 출력 플레이어를 종료한 뒤 수신을 시작하세요. SW는 KONA 입력만 엽니다.":"\nKONA는 외부 플레이어가 사용합니다. 스위처는 DeckLink 입력만 엽니다."));
     previousRoutingMode_=sourceMode_->currentIndex();
+    if(!receive&&mediaEnabled_->isChecked())routingHint_->setText("INPUT 4 = 내장 플레이어\nSDI 입력 1~3 + PGM / PVW 출력");
 }
 void Window::startSession() {
     try {
         Configuration c;c.mode=mode_->currentIndex()?Mode::Uhd:Mode::Hd;c.synthetic=sourceMode_->currentIndex()==0;c.receiveOnly=sourceMode_->currentIndex()>=2;c.receiveBackend=sourceMode_->currentIndex()==3?"aja":"decklink";QSettings settings;settings.setValue("mode",mode_->currentIndex());
+        if(!c.receiveOnly&&mediaEnabled_->isChecked()) {
+            if(!QFileInfo(mediaFile_->text()).isFile())throw std::runtime_error("Select an existing player file first.");
+            c.mediaPath=mediaFile_->text().toUtf8().toStdString();c.mediaLoop=mediaLoop_->isChecked();
+            settings.setValue("mediaFile",mediaFile_->text());settings.setValue("mediaLoop",c.mediaLoop);
+        }
         if(!c.synthetic) for(int i=0;i<(c.receiveOnly?4:6);++i) {
+            if(i==3&&!c.mediaPath.empty()){c.inputs[3]=mediaEndpoint();continue;}
             auto id=ports_[i]->currentData().toString();auto e=std::find_if(devices_.begin(),devices_.end(),[&](const Endpoint& p){return p.id==id.toStdString();});
             settings.setValue(QString(c.receiveOnly?(c.receiveBackend=="aja"?"ajaReceivePort%1":"receivePort%1"):"port%1").arg(i),id);
             if(c.receiveOnly&&id.isEmpty())continue;
@@ -121,6 +141,10 @@ void Window::startSession() {
     } catch(const std::exception& e) { QMessageBox::warning(this,"SW · 세션 시작 실패",QString::fromUtf8(e.what())); }
 }
 void Window::startDemo() { sourceMode_->setCurrentIndex(0);startSession(); }
+void Window::startMediaDemo(const QString& path,bool uhd,bool play) {
+    sourceMode_->setCurrentIndex(0);mode_->setCurrentIndex(uhd?1:0);mediaFile_->setText(path);mediaEnabled_->setChecked(true);mute_->setChecked(false);mediaAutoPlay_=play;
+    startSession();engine_.selectPreview(3);engine_.cut();engine_.selectPreview(3);
+}
 void Window::startSdi(int program,bool unmute,bool uhd,const QStringList& ports) {
     sourceMode_->setCurrentIndex(1);mode_->setCurrentIndex(uhd?1:0);mute_->setChecked(!unmute);
     if(ports.size()==6)for(int i=0;i<6;++i)ports_[i]->setCurrentIndex(std::max(0,ports_[i]->findData(ports[i])));
@@ -134,6 +158,11 @@ void Window::applyDve() {
 void Window::update() {
     auto s=engine_.snapshot();const bool busy=s.running||s.starting;session_->setEnabled(!busy);start_->setEnabled(!busy);stop_->setEnabled(busy);cut_->setEnabled(s.running&&!s.state.transitioning);auto_->setEnabled(cut_->isEnabled());dvePanel_->setEnabled(s.running&&!s.state.transitioning);
     mute_->setEnabled(sourceMode_->currentIndex()<2);
+    const bool canConfigure=!busy&&sourceMode_->currentIndex()<2;
+    mediaEnabled_->setEnabled(canConfigure);mediaBrowse_->setEnabled(canConfigure);
+    const bool mediaActive=s.running&&s.media.active&&s.media.error.empty();
+    mediaPlay_->setEnabled(mediaActive&&!s.media.playing&&s.media.ready);mediaPause_->setEnabled(mediaActive&&s.media.playing);mediaCue_->setEnabled(mediaActive);mediaSeek_->setEnabled(mediaActive&&s.media.duration>0);
+    if(mediaAutoPlay_&&mediaActive&&s.media.ready){engine_.player().play();mediaAutoPlay_=false;}
     for(int i=0;i<6;++i) {
         bool valid=i<4?s.signal[i]:s.running;QString label=!busy?"STOPPED":(!valid?"NO SIGNAL":(s.synthetic?"TEST":(i==4?"SDI PGM":i==5?"SDI PVW":"SDI")));
         if(busy&&s.receiveOnly) {
@@ -141,10 +170,17 @@ void Window::update() {
             else if(!s.assigned[i])label="NOT ASSIGNED";
             else if(s.signal[i])label=QString("%1 fps · %2 frames").arg(s.inputFps[i],0,'f',1).arg(s.io[i].frames);
         }
+        if(i==3&&s.media.active)label=s.media.error.empty()?(s.media.playing?"PLAYER · PLAY":s.media.eof?"PLAYER · END":"PLAYER · HOLD"):"PLAYER · ERROR";
         QColor color=i==4?QColor("#ed6a73"):i==5?QColor("#4ed2a0"):QColor("#69809b");monitors_[i]->updateImage(s.monitors[i],label,color,s.monitorFrames!=lastMonitorFrames_);
     }
     lastMonitorFrames_=s.monitorFrames;
     const auto now=std::chrono::steady_clock::now();if(now<nextControls_)return;nextControls_=now+std::chrono::milliseconds(100);
+    if(s.media.active||!s.media.error.empty()) {
+        const auto time=[](double value){const int n=int(std::max(0.,value));return QString("%1:%2:%3").arg(n/3600,2,10,QChar('0')).arg(n/60%60,2,10,QChar('0')).arg(n%60,2,10,QChar('0'));};
+        const auto text=s.media.error.empty()?QString("%1 / %2 · %3 · 버퍼 %4 frames · 디코드 %5 ms · 재생 대기 %6").arg(time(s.media.position)).arg(time(s.media.duration)).arg(s.media.playing?"재생":s.media.eof?"끝":s.media.ready?"CUE / 일시정지":"불러오는 중").arg(s.media.buffered).arg(s.media.decodeMs,0,'f',1).arg(s.media.underruns):"플레이어 오류: "+QString::fromStdString(s.media.error);
+        mediaStatus_->setText(text);mediaStatus_->setToolTip(text);mediaStatus_->setStyleSheet(s.media.error.empty()?"color:#93a5b8;":"color:#ff929a;");
+        if(!mediaSeek_->isSliderDown()&&s.media.duration>0)mediaSeek_->setValue(int(s.media.position/s.media.duration*10000));
+    }else mediaStatus_->setText("파일 선택 → 세션 시작 → CUE 확인 → 재생 · INPUT 4를 PVW/PGM으로 선택");
     for(int i=0;i<4;++i) { previewButtons_[i]->setEnabled(s.running&&!s.state.transitioning);previewButtons_[i]->setStyleSheet(i==s.state.preview.background?"background:#216455;border-color:#4ed2a0;":""); }
     syncing_=true;const auto& d=s.state.preview.dve;dveEnabled_->setChecked(d.enabled);dveSource_->setCurrentIndex(d.source);
     const float values[]={d.x,d.y,d.width,d.height,d.cropLeft,d.cropTop,d.cropRight,d.cropBottom,d.rotation,d.opacity,d.border};
@@ -172,6 +208,8 @@ void Window::update() {
         nextDiagnostics_=now+std::chrono::seconds(1);QJsonArray ports;
         for(int i=0;i<6;++i){const auto& io=s.io[i];ports.append(QJsonObject{{"slot",i},{"endpoint",ports_[i]->currentData().toString()},{"frames",double(io.frames)},{"dropped",double(io.dropped)},{"noSignal",double(io.noSignal)},{"audioFrames",double(io.audioFrames)},{"audioPeakDb",io.audioPeak},{"bufferedAudioFrames",int(io.bufferedAudioFrames)},{"timingRecoveries",double(io.timingRecoveries)},{"partialAudioWrites",double(io.audioPartialWrites)}});}
         QJsonObject report{{"time",QDateTime::currentDateTimeUtc().toString(Qt::ISODateWithMs)},{"running",s.running},{"receiveOnly",s.receiveOnly},{"muted",s.muted},{"pgmInput",s.state.program.background+1},{"pvwInput",s.state.preview.background+1},{"overruns",double(s.overruns)},{"audioUnderruns",double(s.audioUnderruns)},{"audioOverflowFrames",double(s.audioOverflowFrames)},{"renderMs",s.renderMs},{"ticks",double(s.ticks)},{"ports",ports},{"error",QString::fromStdString(s.error)}};
+        report.insert("player",QJsonObject{{"active",s.media.active},{"playing",s.media.playing},{"position",s.media.position},{"duration",s.media.duration},{"bufferedFrames",double(s.media.buffered)},{"underruns",double(s.media.underruns)},{"decodeMs",s.media.decodeMs},{"hardwareDecode",s.media.hardware},{"videoDecodeMs",s.media.videoMs},{"convertMs",s.media.convertMs},{"audioDecodeMs",s.media.audioMs},{"error",QString::fromStdString(s.media.error)}});
+        if(s.media.active){auto port=ports[3].toObject();port.insert("endpoint","media:4");ports[3]=port;report.insert("ports",ports);}
         QSaveFile file(diagnosticsPath_);if(file.open(QIODevice::WriteOnly)){file.write(QJsonDocument(report).toJson());file.commit();}
     }
 }

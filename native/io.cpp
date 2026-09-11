@@ -39,7 +39,11 @@ void validateRouting(const std::array<Endpoint,4>& inputs,const std::array<Endpo
         if(!used.insert(e.id).second) throw std::runtime_error("A physical endpoint cannot be assigned twice: "+e.label);
         if(!(mode==Mode::Uhd?e.uhd:e.hd)) throw std::runtime_error("Selected format is unavailable on "+e.label+". "+e.detail);
     };
-    for(const auto& e:inputs) check(e,true);
+    for(size_t i=0;i<inputs.size();++i) {
+        const auto& e=inputs[i];
+        if(e.backend=="media"&&(i!=3||e.id!="media:4"))throw std::runtime_error("Internal player is available on INPUT 4 only.");
+        check(e,true);
+    }
     for(const auto& e:outputs) check(e,false);
 }
 void validateReceiveRouting(const std::array<Endpoint,4>& inputs,Mode mode,const std::string& backend) {

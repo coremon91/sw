@@ -72,6 +72,7 @@ struct Frame {
     int stride = 0;
     uint64_t sequence = 0;
     std::chrono::steady_clock::time_point captured;
+    bool persistent=false; // Internal file source may intentionally hold a still frame.
     std::vector<uint8_t> data; // UYVY, limited-range Rec.709, 8-bit 4:2:2.
     std::vector<int32_t> audio; // Interleaved stereo, signed 32-bit / 48kHz.
 };

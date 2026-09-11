@@ -15,7 +15,9 @@ int main(int argc,char** argv) {
         window.startSdi(program-1,args.contains("--unmute"),args.contains("--uhd"),ports);
     }
     if(args.contains("--self-test-layout")) {QTimer::singleShot(0,&window,[&]{app.exit(window.verifyStableLayout()?0:1);});return app.exec();}
-    if(!receiver&&(args.contains("--demo")||args.contains("--screenshot")))window.startDemo();
+    const int media=args.indexOf("--media");
+    if(media>=0&&media+1<args.size())window.startMediaDemo(args[media+1],args.contains("--uhd"),args.contains("--play-media"));
+    else if(!receiver&&(args.contains("--demo")||args.contains("--screenshot")))window.startDemo();
     int index=args.indexOf("--screenshot");if(index>=0&&index+1<args.size()) {
         const auto path=args[index+1];QTimer::singleShot(3500,&window,[&app,&window,path]{app.exit(window.savePreview(path)?0:1);});
     }

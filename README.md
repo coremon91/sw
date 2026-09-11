@@ -10,6 +10,7 @@ Vizrt TriCaster의 제작 흐름을 참고하는 **Windows C++20 / Qt 6 / Direct
 - DeckLink SDI 캡처/예약 재생, AJA NTV2 AutoCirculate 캡처/재생.
 - 장치 검색, 포트 검증, 신호 소실 표시, 드롭·처리 시간 진단.
 - 테스트 패턴 모드와 실제 UHD SDI 프레임 마커 루프백 진단.
+- **INPUT 4 내장 플레이어**: 기존 플레이어의 FFmpeg 런타임으로 파일을 직접 입력. CUE·재생·일시정지·탐색·반복, CH1/2 오디오와 PGM/PVW 연결. [사용법과 포맷 조건](docs/08-internal-player.ko.md).
 - **DeckLink 수신 확인 모드**: 외부 4K 플레이어가 KONA로 출력하는 영상을 입력 1개부터 수신. KONA 점유·SDI 출력 없이 화면과 수신 프레임 수/fps 확인. `dist/SW/DeckLink-receive.cmd`로 설정 화면을 엽니다.
 - **KONA 5 수신 확인 모드**: 반대로 DeckLink 출력 → KONA 입력을 확인. `KONA-receive.cmd`로 실행하며, 입력 1–4개만 열고 SDI 출력은 생성하지 않습니다.
 - 수신 모니터는 59.94회/초 처리를 목표로 하며 입력 FPS, 화면 처리 FPS, 모니터 생략 횟수를 구분합니다. UHD 축소 필터와 상태 영역 높이 고정으로 표시 안정성을 개선했습니다.
@@ -22,6 +23,7 @@ Vizrt TriCaster의 제작 흐름을 참고하는 **Windows C++20 / Qt 6 / Direct
 
 ```powershell
 .\scripts\bootstrap.ps1
+.\scripts\prepare-player.ps1 -PlayerRoot '기존 KONA 플레이어 소스 폴더'
 .\scripts\build.ps1
 .\scripts\run.ps1 -Demo
 ```

@@ -1,7 +1,8 @@
-param([string]$QtRoot = '', [switch]$NoAja)
+param([string]$QtRoot = '', [switch]$NoAja, [string]$FFmpegRoot = '')
 $ErrorActionPreference = 'Stop'
 $projectRoot = Split-Path -Parent $PSScriptRoot
 if (-not $QtRoot) { $QtRoot = Join-Path $projectRoot '.deps/Qt/6.8.3/msvc2022_64' }
+if (-not $FFmpegRoot) { $FFmpegRoot = Join-Path $projectRoot '.deps/ffmpeg' }
 $cmake = Join-Path $projectRoot '.tools/python-packages/cmake/data/bin/cmake.exe'
 if (-not (Test-Path $cmake)) { $cmake = (Get-Command cmake -ErrorAction Stop).Source }
 $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio/Installer/vswhere.exe'
@@ -12,7 +13,7 @@ $generator = if ($major -ge 18) { 'Visual Studio 18 2026' } else { 'Visual Studi
 Push-Location $projectRoot
 try {
     $ajaOption = if ($NoAja) { 'OFF' } else { 'ON' }
-    & $cmake -S . -B build -G $generator -A x64 "-DCMAKE_PREFIX_PATH=$QtRoot" "-DSW_WITH_AJA=$ajaOption"
+    & $cmake -S . -B build -G $generator -A x64 "-DCMAKE_PREFIX_PATH=$QtRoot" "-DSW_WITH_AJA=$ajaOption" "-DSW_FFMPEG_ROOT=$FFmpegRoot"
     if ($LASTEXITCODE) { throw 'Configuration failed.' }
     & $cmake --build build --config Release --parallel 8
     if ($LASTEXITCODE) { throw 'Build failed.' }
@@ -37,5 +38,7 @@ try {
     Copy-Item -LiteralPath scripts/KONA-receive.cmd -Destination dist/SW/
     Copy-Item -LiteralPath docs/06-receiver-jitter.ko.md -Destination dist/SW/수신시험안내.md
     Copy-Item -LiteralPath docs/07-audio-validation.ko.md -Destination dist/SW/오디오시험안내.md
+    Copy-Item -LiteralPath docs/08-internal-player.ko.md -Destination dist/SW/내장플레이어안내.md
+    if(Test-Path (Join-Path $FFmpegRoot 'BUILD-INFO.txt')) { Copy-Item -LiteralPath (Join-Path $FFmpegRoot 'BUILD-INFO.txt') -Destination dist/SW/licenses/FFmpeg-BUILD-INFO.txt }
     Write-Host 'Ready: dist/SW/sw_switcher.exe (requires installed Visual C++ x64 runtime and card drivers).'
 } finally { Pop-Location }

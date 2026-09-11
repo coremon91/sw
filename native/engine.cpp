@@ -8,6 +8,10 @@ namespace sw {
 Engine::~Engine() { stop(); }
 void Engine::start(Configuration config) {
     stop();
+    if(!config.mediaPath.empty()) {
+        if(config.receiveOnly)throw std::runtime_error("Internal player is unavailable in card receive-only mode.");
+        config.inputs[3]=mediaEndpoint();
+    }else if(config.inputs[3].backend=="media")throw std::runtime_error("Select a player file before starting.");
     if(config.receiveOnly) {
         if(config.synthetic) throw std::runtime_error("Receive-only mode cannot use synthetic inputs.");
         validateReceiveRouting(config.inputs,config.mode,config.receiveBackend);
@@ -22,7 +26,7 @@ void Engine::stop() {
     { std::lock_guard lock(mutex_);quit_=true; }wake_.notify_all();
     if(worker_.joinable()) worker_.join();
 }
-Snapshot Engine::snapshot() const { std::lock_guard lock(mutex_);return snapshot_; }
+Snapshot Engine::snapshot() const { std::lock_guard lock(mutex_);auto s=snapshot_;s.media=player_.status();return s; }
 void Engine::selectPreview(int i) { std::lock_guard lock(mutex_);switcher_.preview(i); }
 void Engine::setDve(Dve d) { std::lock_guard lock(mutex_);switcher_.setDve(d); }
 void Engine::cut() { std::lock_guard lock(mutex_);switcher_.cut(); }
@@ -41,8 +45,11 @@ void Engine::run(Configuration config) {
     try {
         if(FAILED(com)) throw std::runtime_error("Unable to initialize COM on video thread.");
         GpuCompositor gpu;gpu.initialize(format,true);
+        const bool mediaEnabled=!config.mediaPath.empty();
+        if(mediaEnabled)player_.open(config.mediaPath,format,config.mediaLoop);
         if(!config.synthetic) {
             for(int i=0;i<4;++i) {
+                if(i==3&&mediaEnabled)continue;
                 if(config.receiveOnly&&config.inputs[i].id.empty()) continue;
                 inputs[i]=makeInput(config.inputs[i]);
                 inputs[i]->start(config.inputs[i],format,[&,i](FramePtr f) {
@@ -55,6 +62,8 @@ void Engine::run(Configuration config) {
         { std::lock_guard lock(mutex_);snapshot_.starting=false;snapshot_.running=true;snapshot_.adapter=gpu.adapter(); }
         FramePool patterns{12};
         std::array<FramePtr,4> frames;
+        std::deque<std::pair<uint64_t,std::vector<int32_t>>> mediaAudio;
+        double mediaPeak=-120.;
         uint64_t tick=0,overruns=0,audioUnderruns=0;
         auto base=std::chrono::steady_clock::now();
         auto rateTime=base;std::array<uint64_t,4> previousCounts{};std::array<double,4> rates{};
@@ -65,7 +74,14 @@ void Engine::run(Configuration config) {
             { std::lock_guard lock(mutex_);if(quit_) break;state=switcher_.state();muted=muted_; }
             auto begin=std::chrono::steady_clock::now();
             for(int i=0;i<4;++i) {
-                if(config.synthetic) {
+                if(i==3&&mediaEnabled) {
+                    if(tick%format.ticksPerFrame()==0) {
+                        const auto sequence=tick/format.ticksPerFrame();
+                        auto sample=player_.pull(audioSamples(sequence,format));frames[i]=sample.video;
+                        mediaPeak=audioPeakDb(sample.audio);mediaAudio.emplace_back(sequence,std::move(sample.audio));
+                        while(mediaAudio.size()>4)mediaAudio.pop_front();
+                    }
+                }else if(config.synthetic) {
                     if(tick%format.ticksPerFrame()==0) {
                         auto f=patterns.acquire(format);if(!f) throw std::runtime_error("Test source pool exhausted");
                         fillPattern(*f,i,tick);frames[i]=f;
@@ -91,6 +107,11 @@ void Engine::run(Configuration config) {
                   for(int i=0;i<4;++i) {
                     samples[i]=audio[i].take(count);
                   } }
+                if(mediaEnabled) {
+                    const auto seq=result.output[0]->sequence;
+                    auto found=std::find_if(mediaAudio.begin(),mediaAudio.end(),[&](const auto& a){return a.first==seq;});
+                    if(found!=mediaAudio.end())samples[3]=found->second;
+                }
                 for(int bus=0;bus<2;++bus) {
                     // The pool created this mutable object; nobody else has received it yet.
                     auto f=std::const_pointer_cast<Frame>(result.output[bus]);f->audio.assign(size_t(count)*2,0);
@@ -109,6 +130,7 @@ void Engine::run(Configuration config) {
                 if(i>=4&&outputs[i-4]) stats[i]=outputs[i-4]->stats();
                 if(!stats[i].error.empty()) throw std::runtime_error(stats[i].error);
             }
+            if(mediaEnabled) {auto m=player_.status();stats[3].frames=m.frames;stats[3].dropped=m.underruns;stats[3].audioPeak=mediaPeak;}
             const auto end=std::chrono::steady_clock::now();
             std::array<uint32_t,4> audioBuffered{};uint64_t audioOverflow=0;audioUnderruns=0;
             {std::lock_guard lock(audioMutex);for(int i=0;i<4;++i) {audioBuffered[i]=uint32_t(audio[i].bufferedFrames());audioOverflow+=audio[i].overflowFrames;audioUnderruns+=audio[i].underruns;}}
@@ -130,13 +152,14 @@ void Engine::run(Configuration config) {
               snapshot_.audioBuffered=audioBuffered;snapshot_.audioOverflowFrames=audioOverflow;snapshot_.muted=muted;
               if(result.output[0])snapshot_.outputAudioPeak=outputPeaks;
               snapshot_.sourceMs=std::chrono::duration<double,std::milli>(gpuBegin-begin).count();snapshot_.gpuMs=std::chrono::duration<double,std::milli>(gpuEnd-gpuBegin).count();
-              for(int i=0;i<4;++i) snapshot_.signal[i]=frames[i]&&end-frames[i]->captured<std::chrono::milliseconds(500);
+              for(int i=0;i<4;++i) snapshot_.signal[i]=frames[i]&&(frames[i]->persistent||end-frames[i]->captured<std::chrono::milliseconds(500));
               if(newMonitor) snapshot_.monitors=std::move(result.monitors);
               switcher_.advance();wake_.wait_until(lock,next,[&]{return quit_;}); }
             ++tick;
         }
     } catch(const std::exception& e) { std::lock_guard lock(mutex_);snapshot_.error=e.what(); }
     for(auto& in:inputs) if(in) in->stop();
+    player_.close();
     for(auto& out:outputs) if(out) out->stop();
     inputs={};outputs={};
     timeEndPeriod(1);if(SUCCEEDED(com)) CoUninitialize();

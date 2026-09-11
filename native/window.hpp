@@ -8,6 +8,8 @@
 #include <QSpinBox>
 #include <QDoubleSpinBox>
 #include <QTimer>
+#include <QLineEdit>
+#include <QSlider>
 namespace sw {
 class Monitor:public QWidget {
 public:
@@ -26,6 +28,7 @@ public:
     ~Window() override;
     void startDemo();
     void startSdi(int program,bool unmute,bool uhd,const QStringList& ports);
+    void startMediaDemo(const QString& path,bool uhd,bool play);
     void setDiagnosticsPath(QString path) {diagnosticsPath_=std::move(path);}
     bool savePreview(const QString&);
     bool verifyStableLayout();
@@ -51,6 +54,12 @@ private:
     QString diagnosticsPath_;
     int previousRoutingMode_=-1;
     QLabel* audioStatus_;
+    QCheckBox *mediaEnabled_,*mediaLoop_;
+    QLineEdit* mediaFile_;
+    QPushButton *mediaBrowse_,*mediaPlay_,*mediaPause_,*mediaCue_;
+    QSlider* mediaSeek_;
+    QLabel* mediaStatus_;
+    bool mediaAutoPlay_=false;
     void refreshDevices();
     void startSession();
     void update();
