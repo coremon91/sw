@@ -39,6 +39,7 @@ try {
     Copy-Item -LiteralPath docs/06-receiver-jitter.ko.md -Destination dist/SW/수신시험안내.md
     Copy-Item -LiteralPath docs/07-audio-validation.ko.md -Destination dist/SW/오디오시험안내.md
     Copy-Item -LiteralPath docs/08-internal-player.ko.md -Destination dist/SW/내장플레이어안내.md
+    Copy-Item -LiteralPath docs/09-original-player-tab.ko.md -Destination dist/SW/플레이어탭안내.md
     if(Test-Path (Join-Path $FFmpegRoot 'BUILD-INFO.txt')) { Copy-Item -LiteralPath (Join-Path $FFmpegRoot 'BUILD-INFO.txt') -Destination dist/SW/licenses/FFmpeg-BUILD-INFO.txt }
     Write-Host 'Ready: dist/SW/sw_switcher.exe (requires installed Visual C++ x64 runtime and card drivers).'
 } finally { Pop-Location }

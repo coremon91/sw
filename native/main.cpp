@@ -8,6 +8,7 @@ int main(int argc,char** argv) {
     for(const auto* name:{"segoeui.ttf","segoeuib.ttf","malgun.ttf"}) QFontDatabase::addApplicationFont(fonts+name);
     const auto args=app.arguments();const int receiver=args.contains("--receive-aja")?2:args.contains("--receive")?1:0;
     sw::Window window(receiver);window.show();
+    if(args.contains("--portable-player"))QTimer::singleShot(0,&window,[&]{window.showPortablePlayer();});
     const int diagnostics=args.indexOf("--diagnostics");if(diagnostics>=0&&diagnostics+1<args.size())window.setDiagnosticsPath(args[diagnostics+1]);
     if(args.contains("--sdi")) {
         int program=1;const int p=args.indexOf("--pgm");if(p>=0&&p+1<args.size())program=args[p+1].toInt();if(program<1||program>4)return 2;

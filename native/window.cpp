@@ -21,6 +21,8 @@
 #include <QDateTime>
 #include <QFileDialog>
 #include <QFileInfo>
+#include <QStackedWidget>
+#include <QCloseEvent>
 namespace sw {
 Monitor::Monitor(QString title,QWidget* parent):QWidget(parent),title_(std::move(title)) { setMinimumSize(180,125);setSizePolicy(QSizePolicy::Expanding,QSizePolicy::Expanding); }
 void Monitor::updateImage(const Image& i,QString status,QColor accent,bool newImage) {
@@ -41,7 +43,13 @@ void Monitor::paintEvent(QPaintEvent*) {
 Window::Window(int receiver) {
     setWindowTitle("SW 0.1 — Software Video Switcher");resize(1480,940);
     setStyleSheet(R"(QMainWindow,QWidget{background:#111820;color:#dce3ec;font-family:'Segoe UI';font-size:12px;}QGroupBox{border:1px solid #303e4e;border-radius:6px;margin-top:18px;padding:10px;}QGroupBox::title{subcontrol-origin:margin;left:10px;color:#8fa3b9;}QPushButton{background:#263444;border:1px solid #3d5064;padding:9px 14px;border-radius:4px;font-weight:600;}QPushButton:hover{background:#354960;}QPushButton:disabled{color:#627084;background:#1a242f;}QComboBox,QSpinBox,QDoubleSpinBox{background:#1b2835;border:1px solid #3d5064;border-radius:3px;padding:5px;}QLabel#headline{font-size:23px;font-weight:700;}QCheckBox{spacing:8px;}QScrollArea{border:0;})");
-    auto* scroll=new QScrollArea;scroll->setWidgetResizable(true);setCentralWidget(scroll);
+    tabs_=new QTabWidget;setCentralWidget(tabs_);
+    auto* scroll=new QScrollArea;scroll->setWidgetResizable(true);tabs_->addTab(scroll,"스위처");
+    playerPage_=new QWidget;auto* playerTabLayout=new QVBoxLayout(playerPage_);playerTabLayout->setContentsMargins(12,8,12,8);tabs_->addTab(playerPage_,"플레이어");
+    playerMode_=new QComboBox;playerMode_->addItems({"KBC Tech Player · RTX 5060 · 2026-09-07 원본","SW 파일 입력 · INPUT 4 직접 연결"});playerTabLayout->addWidget(playerMode_);
+    auto* playerStack=new QStackedWidget;playerTabLayout->addWidget(playerStack,1);portablePlayer_=new PortablePlayer;playerStack->addWidget(portablePlayer_);
+    auto* internalPage=new QWidget;auto* playerPageLayout=new QVBoxLayout(internalPage);playerPageLayout->setContentsMargins(8,8,8,8);playerStack->addWidget(internalPage);
+    connect(playerMode_,qOverload<int>(&QComboBox::currentIndexChanged),playerStack,&QStackedWidget::setCurrentIndex);
     auto* root=new QWidget;scroll->setWidget(root);auto* layout=new QVBoxLayout(root);layout->setContentsMargins(20,14,20,14);layout->setSpacing(12);
     auto* header=new QHBoxLayout;auto* title=new QLabel("SW   /   VIDEO SWITCHER");title->setObjectName("headline");header->addWidget(title);header->addStretch();
     auto* version=new QLabel("C++ · GPU 합성  |  개발 버전 0.1");version->setStyleSheet("color:#8fa3b9;");header->addWidget(version);layout->addLayout(header);
@@ -62,12 +70,14 @@ Window::Window(int receiver) {
     connect(cut_,&QPushButton::clicked,this,[this]{engine_.cut();});connect(auto_,&QPushButton::clicked,this,[this]{engine_.autoMix(duration_->value());});connect(mute_,&QCheckBox::toggled,this,[this](bool m){engine_.setMuted(m);});
     auto* cutKey=new QShortcut(QKeySequence(Qt::Key_Space),this);connect(cutKey,&QShortcut::activated,cut_,&QPushButton::click);
     auto* autoKey=new QShortcut(QKeySequence(Qt::Key_Return),this);connect(autoKey,&QShortcut::activated,auto_,&QPushButton::click);
+    playerMonitor_=new Monitor("PLAYER / INPUT 4");playerMonitor_->setMinimumHeight(270);playerPageLayout->addWidget(playerMonitor_,1);
     auto* playerBox=new QGroupBox("PLAYER / INPUT 4");auto* playerLayout=new QVBoxLayout(playerBox);auto* fileRow=new QHBoxLayout;
     mediaEnabled_=new QCheckBox("INPUT 4 · 내장 플레이어");mediaFile_=new QLineEdit;mediaFile_->setReadOnly(true);mediaFile_->setPlaceholderText("세션과 같은 포맷의 영상 파일을 선택하세요");mediaBrowse_=new QPushButton("파일 열기");
     fileRow->addWidget(mediaEnabled_);fileRow->addWidget(mediaFile_,1);fileRow->addWidget(mediaBrowse_);playerLayout->addLayout(fileRow);
     auto* transport=new QHBoxLayout;mediaCue_=new QPushButton("CUE / 처음");mediaPlay_=new QPushButton("재생");mediaPause_=new QPushButton("일시정지");mediaLoop_=new QCheckBox("반복");mediaSeek_=new QSlider(Qt::Horizontal);mediaSeek_->setRange(0,10000);
     transport->addWidget(mediaCue_);transport->addWidget(mediaPlay_);transport->addWidget(mediaPause_);transport->addWidget(mediaLoop_);transport->addWidget(mediaSeek_,1);playerLayout->addLayout(transport);
-    mediaStatus_=new QLabel("파일 선택 → 세션 시작 → CUE 확인 → 재생 · INPUT 4를 PVW/PGM으로 선택");mediaStatus_->setFixedHeight(mediaStatus_->fontMetrics().lineSpacing()+6);mediaStatus_->setSizePolicy(QSizePolicy::Ignored,QSizePolicy::Fixed);playerLayout->addWidget(mediaStatus_);layout->addWidget(playerBox);
+    mediaStatus_=new QLabel("파일 선택 → 세션 시작 → CUE 확인 → 재생 · INPUT 4를 PVW/PGM으로 선택");mediaStatus_->setFixedHeight(mediaStatus_->fontMetrics().lineSpacing()+6);mediaStatus_->setSizePolicy(QSizePolicy::Ignored,QSizePolicy::Fixed);playerLayout->addWidget(mediaStatus_);playerPageLayout->addWidget(playerBox);
+    auto* playerLink=new QPushButton("플레이어 탭 열기");controls->addWidget(playerLink);connect(playerLink,&QPushButton::clicked,this,[this]{tabs_->setCurrentWidget(playerPage_);});
     connect(mediaBrowse_,&QPushButton::clicked,this,[this]{const auto path=QFileDialog::getOpenFileName(this,"플레이어 영상 선택",mediaFile_->text(),"영상 (*.mxf *.mov *.mp4 *.mkv *.avi *.ts *.m2ts);;모든 파일 (*)");if(!path.isEmpty()){mediaFile_->setText(path);mediaFile_->setToolTip(path);mediaEnabled_->setChecked(true);}});
     connect(mediaEnabled_,&QCheckBox::toggled,this,[this]{refreshDevices();});
     connect(mediaCue_,&QPushButton::clicked,this,[this]{engine_.player().cue();});connect(mediaPlay_,&QPushButton::clicked,this,[this]{engine_.player().play();});connect(mediaPause_,&QPushButton::clicked,this,[this]{engine_.player().pause();});
@@ -97,11 +107,18 @@ Window::Window(int receiver) {
     connect(qApp,&QApplication::focusChanged,this,[this](QWidget*,QWidget* focused) {
         bool editing=false;
         for(auto* p=focused;p;p=p->parentWidget()) if(qobject_cast<QLineEdit*>(p)||qobject_cast<QAbstractSpinBox*>(p)||qobject_cast<QComboBox*>(p)) {editing=true;break;}
-        for(auto* shortcut:findChildren<QShortcut*>())shortcut->setEnabled(!editing);
+        for(auto* shortcut:findChildren<QShortcut*>())shortcut->setEnabled(!editing&&tabs_->currentIndex()==0);
     });
+    connect(tabs_,&QTabWidget::currentChanged,this,[this]{for(auto* shortcut:findChildren<QShortcut*>())shortcut->setEnabled(tabs_->currentIndex()==0);});
     connect(&timer_,&QTimer::timeout,this,[this]{update();});timer_.setTimerType(Qt::PreciseTimer);timer_.start(16);update();
 }
 Window::~Window() { engine_.stop(); }
+void Window::closeEvent(QCloseEvent* event) {
+    engine_.stop();portablePlayer_->shutdown();QMainWindow::closeEvent(event);
+    // A foreign QWindow can keep Qt's last-window tracking alive after the
+    // main widget closes. Explicitly finish the single-main-window application.
+    if(event->isAccepted())QCoreApplication::quit();
+}
 void Window::refreshDevices() {
     const bool receive=sourceMode_->currentIndex()>=2,aja=sourceMode_->currentIndex()==3;
     std::vector<std::string> warnings;devices_=receive?probeReceiveDevices(aja?"aja":"decklink",warnings):probeDevices(warnings);QSettings settings;
@@ -141,7 +158,9 @@ void Window::startSession() {
     } catch(const std::exception& e) { QMessageBox::warning(this,"SW · 세션 시작 실패",QString::fromUtf8(e.what())); }
 }
 void Window::startDemo() { sourceMode_->setCurrentIndex(0);startSession(); }
+void Window::showPortablePlayer(){playerMode_->setCurrentIndex(0);tabs_->setCurrentWidget(playerPage_);portablePlayer_->launch();}
 void Window::startMediaDemo(const QString& path,bool uhd,bool play) {
+    playerMode_->setCurrentIndex(1);
     sourceMode_->setCurrentIndex(0);mode_->setCurrentIndex(uhd?1:0);mediaFile_->setText(path);mediaEnabled_->setChecked(true);mute_->setChecked(false);mediaAutoPlay_=play;
     startSession();engine_.selectPreview(3);engine_.cut();engine_.selectPreview(3);
 }
@@ -173,6 +192,7 @@ void Window::update() {
         if(i==3&&s.media.active)label=s.media.error.empty()?(s.media.playing?"PLAYER · PLAY":s.media.eof?"PLAYER · END":"PLAYER · HOLD"):"PLAYER · ERROR";
         QColor color=i==4?QColor("#ed6a73"):i==5?QColor("#4ed2a0"):QColor("#69809b");monitors_[i]->updateImage(s.monitors[i],label,color,s.monitorFrames!=lastMonitorFrames_);
     }
+    playerMonitor_->updateImage(s.monitors[3],s.media.active?"INPUT 4":"STOPPED",QColor("#4ed2a0"),s.monitorFrames!=lastMonitorFrames_);
     lastMonitorFrames_=s.monitorFrames;
     const auto now=std::chrono::steady_clock::now();if(now<nextControls_)return;nextControls_=now+std::chrono::milliseconds(100);
     if(s.media.active||!s.media.error.empty()) {

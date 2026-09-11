@@ -10,6 +10,8 @@
 #include <QTimer>
 #include <QLineEdit>
 #include <QSlider>
+#include <QTabWidget>
+#include "portable_player.hpp"
 namespace sw {
 class Monitor:public QWidget {
 public:
@@ -29,9 +31,12 @@ public:
     void startDemo();
     void startSdi(int program,bool unmute,bool uhd,const QStringList& ports);
     void startMediaDemo(const QString& path,bool uhd,bool play);
+    void showPortablePlayer();
     void setDiagnosticsPath(QString path) {diagnosticsPath_=std::move(path);}
     bool savePreview(const QString&);
     bool verifyStableLayout();
+protected:
+    void closeEvent(QCloseEvent*) override;
 private:
     Engine engine_;
     QTimer timer_;
@@ -60,6 +65,11 @@ private:
     QSlider* mediaSeek_;
     QLabel* mediaStatus_;
     bool mediaAutoPlay_=false;
+    QTabWidget* tabs_;
+    QWidget* playerPage_;
+    Monitor* playerMonitor_;
+    PortablePlayer* portablePlayer_;
+    QComboBox* playerMode_;
     void refreshDevices();
     void startSession();
     void update();
