@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=1920, height=1080" />
+    <title>Weather CG</title>
+    <link rel="stylesheet" href="weather.css" />
+  </head>
+  <body>
+    <main id="scene">
+      <section id="weatherCard">
+        <div id="weatherBody" class="body">
+          <img id="weatherIcon" alt="" />
+          <div class="conditions"><strong id="weatherCity"></strong><b id="weatherTemp"></b></div>
+        </div>
+        <time id="weatherClock" aria-label="한국 시간"></time>
+      </section>
+    </main>
+    <script src="broadcast-layout.js"></script>
+    <script src="weather.js"></script>
+  </body>
+</html>

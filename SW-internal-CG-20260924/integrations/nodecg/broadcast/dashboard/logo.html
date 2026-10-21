@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <style>
+      * { box-sizing: border-box; }
+      body { margin: 0; color: #202124; font: 13px Arial, sans-serif; }
+      .preview-toolbar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
+      #previewViewport { position: relative; width: 100%; aspect-ratio: 16/9; overflow: hidden; border: 1px solid #aeb4bf; border-radius: 5px; background: #25314d; }
+      #previewFrame { position: absolute; width: 1920px; height: 1080px; border: 0; transform-origin: 0 0; }
+      #dragSurface { position: absolute; inset: 0; z-index: 2; pointer-events: none; }
+      #dragHandle { position: absolute; border: 2px dashed rgba(255,255,255,.9); border-radius: 4px; cursor: grab; pointer-events: auto; touch-action: none; box-shadow: 0 0 0 1px rgba(23,105,224,.9), 0 2px 8px rgba(0,0,0,.35); }
+      #dragHandle::after { content: "이동"; position: absolute; right: -2px; bottom: -22px; padding: 2px 6px; border-radius: 3px; background: #1769e0; color: white; font-size: 11px; }
+      #dragHandle.dragging { cursor: grabbing; }
+      .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 9px 12px; margin-top: 12px; }
+      .wide { grid-column: 1/-1; }
+      label { display: block; margin-bottom: 3px; font-weight: 700; }
+      input { width: 100%; padding: 7px; border: 1px solid #bdc1c6; border-radius: 4px; }
+      .hint { margin-top: 7px; color: #5f6368; font-size: 12px; }
+      button { border: 0; border-radius: 4px; padding: 9px; font-weight: 700; cursor: pointer; }
+      #refreshPreview, #out { background: #e8eaed; }
+      #take { background: #1769e0; color: #fff; }
+      #updateProgram { background: #f9ab00; }
+      .actions { display: grid; grid-template-columns: repeat(3, 1fr); gap: 7px; margin-top: 14px; }
+      #status { margin-top: 9px; font-size: 12px; }
+      .ok { color: #188038; } .bad { color: #c5221f; }
+    </style>
+  </head>
+  <body>
+    <div class="preview-toolbar">
+      <strong>우상단 회사 로고 · KBC</strong>
+      <button id="refreshPreview" type="button">새로고침</button>
+    </div>
+    <div id="previewViewport">
+      <iframe id="previewFrame" title="로고 프리뷰" src="/bundles/my-cg/graphics/logo.html?preview=1"></iframe>
+      <div id="dragSurface"><div id="dragHandle" title="로고 위치 이동"></div></div>
+    </div>
+    <div class="grid">
+      <div class="wide" id="logoLibrary">
+        <label for="librarySelect">KBC 로고 포맷</label>
+        <select id="librarySelect" style="width:100%;padding:8px"><option value="">직접 URL 입력 / 기존 로고</option></select>
+        <img id="libraryThumbnail" alt="선택한 로고" hidden style="width:100%;height:92px;object-fit:contain;margin-top:8px;background:#263749;border-radius:4px">
+        <p id="libraryInfo" class="hint">로고 목록을 불러오는 중…</p>
+        <button id="librarySize" type="button" disabled>원본 비율 크기 적용</button>
+        <button id="logoReferencePosition" type="button">첨부 가이드 위치 맞춤</button>
+        <p class="hint">우측 상단 가로 영역 · X 1601 / Y 72 · 223 × 48px · 원본 비율 유지</p>
+        <details class="hint"><summary>가져오기 결과 / 편집 포맷 안내</summary><div id="libraryWarnings"></div><a href="/bundles/my-cg/graphics/logo-library/import-report.json" target="_blank" rel="noopener">원본 파일별 변환 내역</a></details>
+      </div>
+      <div class="wide">
+        <label for="image">이미지 URL</label>
+        <input id="image" placeholder="/bundles/my-cg/graphics/images/logo.png" />
+      </div>
+      <div><label for="x">X 위치 (px)</label><input id="x" type="number" min="0" max="1900" step="1" /></div>
+      <div><label for="y">Y 위치 (px)</label><input id="y" type="number" min="0" max="1060" step="1" /></div>
+      <div><label for="width">로고 너비 (px)</label><input id="width" type="number" min="40" max="800" step="1" /></div>
+      <div><label for="height">로고 높이 (px)</label><input id="height" type="number" min="20" max="800" step="1" /></div>
+      <div><label for="opacity">불투명도 (%)</label><input id="opacity" type="number" min="0" max="100" step="1" /></div>
+    </div>
+    <div class="hint">수치를 입력하거나 위 프리뷰의 로고를 마우스로 드래그하면 즉시 반영됩니다.</div>
+    <div class="actions">
+      <button id="take">송출 TAKE</button>
+      <button id="updateProgram">송출 반영</button>
+      <button id="out">송출 OUT</button>
+    </div>
+    <div id="status">상태 확인 중…</div>
+    <script src="/bundles/my-cg/graphics/broadcast-layout.js"></script>
+    <script src="logo.js"></script>
+    <script src="logo-library.js"></script>
+  </body>
+</html>

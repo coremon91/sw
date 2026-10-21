@@ -1,0 +1,7 @@
+#natural-disaster{position:absolute;left:0;bottom:32px;width:1920px;height:72px;display:flex;align-items:stretch;background:rgba(255,255,255,.98);color:#111;opacity:0;transition:opacity .25s,bottom .35s;font-family:"Malgun Gothic",Arial,sans-serif}
+#natural-disaster.visible{opacity:1}
+#natural-badge{flex:0 0 350px;display:flex;align-items:center;justify-content:center;gap:18px;padding:0 18px;background:linear-gradient(110deg,#04a6cb,#0876af);color:white;overflow:hidden;white-space:nowrap}
+#natural-brand{font:700 46px Arial,sans-serif;letter-spacing:-2px}
+#natural-label{font-size:32px;font-weight:800;overflow:hidden;text-overflow:ellipsis}
+#natural-window{position:relative;flex:1;overflow:hidden}
+#natural-text{position:absolute;top:0;height:72px;display:flex;align-items:center;white-space:nowrap;font-size:39px;font-weight:800;will-change:transform}
