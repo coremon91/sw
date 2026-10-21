@@ -12,6 +12,7 @@
 #include <QSlider>
 #include <QTabWidget>
 #include "portable_player.hpp"
+#include "cg_panel.hpp"
 namespace sw {
 class Monitor:public QWidget {
 public:
@@ -32,9 +33,13 @@ public:
     void startSdi(int program,bool unmute,bool uhd,const QStringList& ports);
     void startMediaDemo(const QString& path,bool uhd,bool play);
     void showPortablePlayer();
+    void showCg(){tabs_->setCurrentWidget(cgPanel_);cgPanel_->activate();}
+    bool cgReady() const{return cgPanel_->ready();}
+    bool previewReady() const{const auto s=engine_.snapshot();return s.running&&s.monitorFrames>=2;}
     void setDiagnosticsPath(QString path) {diagnosticsPath_=std::move(path);}
     bool savePreview(const QString&);
     bool verifyStableLayout();
+    bool verifyRoutingModes(const QString& screenshot);
 protected:
     void closeEvent(QCloseEvent*) override;
 private:
@@ -70,8 +75,17 @@ private:
     Monitor* playerMonitor_;
     PortablePlayer* portablePlayer_;
     QComboBox* playerMode_;
+    CgPanel* cgPanel_;
+    QComboBox *cgSource_,*cgFill_,*cgKey_;
+    QCheckBox *cgPreview_,*cgInvert_,*cgPremultiplied_;
+    QPushButton *cgOn_,*cgOff_;
+    QLabel* cgStatus_;
+    bool cgProgramRequested_=false;
+    void applyCg(bool program);
+    void selectInput(int input);
+    QPushButton* cgPlayerTake_;
     void refreshDevices();
-    void startSession();
+    void startSession(bool synthetic=false);
     void update();
     void applyDve();
 };

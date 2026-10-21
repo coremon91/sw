@@ -18,6 +18,7 @@ void Engine::start(Configuration config) {
     } else if(!config.synthetic) validateRouting(config.inputs,config.outputs,config.mode);
     { std::lock_guard lock(mutex_); quit_=false;format_=Format::of(config.mode);switcher_.reset();snapshot_={};snapshot_.starting=true;snapshot_.synthetic=config.synthetic;snapshot_.receiveOnly=config.receiveOnly;
       for(int i=0;i<4;++i)snapshot_.assigned[i]=config.synthetic||!config.inputs[i].id.empty();
+      for(int i=0;i<2;++i)snapshot_.outputAssigned[i]=!config.synthetic&&!config.receiveOnly&&!config.outputs[i].id.empty();
       if(config.receiveOnly)for(int i=0;i<4;++i)if(snapshot_.assigned[i]) {switcher_.preview(i);switcher_.cut();switcher_.preview(i);break;}
       snapshot_.state=switcher_.state(); }
     worker_=std::thread([this,config] { run(config); });
@@ -29,6 +30,8 @@ void Engine::stop() {
 Snapshot Engine::snapshot() const { std::lock_guard lock(mutex_);auto s=snapshot_;s.media=player_.status();return s; }
 void Engine::selectPreview(int i) { std::lock_guard lock(mutex_);switcher_.preview(i); }
 void Engine::setDve(Dve d) { std::lock_guard lock(mutex_);switcher_.setDve(d); }
+void Engine::setDownstreamKey(DownstreamKey d) { std::lock_guard lock(mutex_);switcher_.setDownstreamKey(d); }
+void Engine::setCgFrame(RgbaFramePtr f) { std::lock_guard lock(mutex_);cgFrame_=std::move(f); }
 void Engine::cut() { std::lock_guard lock(mutex_);switcher_.cut(); }
 void Engine::autoMix(unsigned n) { std::lock_guard lock(mutex_);switcher_.autoMix(n,format_); }
 void Engine::setMuted(bool b) { std::lock_guard lock(mutex_);muted_=b; }
@@ -50,14 +53,14 @@ void Engine::run(Configuration config) {
         if(!config.synthetic) {
             for(int i=0;i<4;++i) {
                 if(i==3&&mediaEnabled)continue;
-                if(config.receiveOnly&&config.inputs[i].id.empty()) continue;
+                if(config.inputs[i].id.empty()) continue;
                 inputs[i]=makeInput(config.inputs[i]);
                 inputs[i]->start(config.inputs[i],format,[&,i](FramePtr f) {
                     if(!config.receiveOnly) { std::lock_guard lock(audioMutex);audio[i].push(f->audio); }
                     mail[i].publish(std::move(f));
                 });
             }
-            if(!config.receiveOnly)for(int i=0;i<2;++i) { outputs[i]=makeOutput(config.outputs[i]);outputs[i]->start(config.outputs[i],format); }
+            if(!config.receiveOnly)for(int i=0;i<2;++i)if(!config.outputs[i].id.empty()) { outputs[i]=makeOutput(config.outputs[i]);outputs[i]->start(config.outputs[i],format); }
         }
         { std::lock_guard lock(mutex_);snapshot_.starting=false;snapshot_.running=true;snapshot_.adapter=gpu.adapter(); }
         FramePool patterns{12};
@@ -70,8 +73,8 @@ void Engine::run(Configuration config) {
         uint64_t monitorFrames=0,previousMonitorFrames=0;double monitorRate=0;
         std::array<FramePtr,4> lastShown;std::array<uint64_t,4> skipped{};
         while(true) {
-            RenderState state;bool muted;
-            { std::lock_guard lock(mutex_);if(quit_) break;state=switcher_.state();muted=muted_; }
+            RenderState state;bool muted;RgbaFramePtr cg;
+            { std::lock_guard lock(mutex_);if(quit_) break;state=switcher_.state();muted=muted_;cg=cgFrame_; }
             auto begin=std::chrono::steady_clock::now();
             for(int i=0;i<4;++i) {
                 if(i==3&&mediaEnabled) {
@@ -96,7 +99,7 @@ void Engine::run(Configuration config) {
             }
             const auto gpuBegin=std::chrono::steady_clock::now();
             GpuResult result;
-            if(!config.receiveOnly||show) result=gpu.render(frames,state,tick,show,!config.receiveOnly);
+            if(!config.receiveOnly||show) result=gpu.render(frames,state,tick,show,!config.receiveOnly,cg);
             const auto gpuEnd=std::chrono::steady_clock::now();
             std::array<double,2> outputPeaks{-120.,-120.};
             if(result.output[0]) {
@@ -146,6 +149,7 @@ void Engine::run(Configuration config) {
             }
             { std::unique_lock lock(mutex_);
               snapshot_.state=state;snapshot_.ticks=tick+1;snapshot_.overruns=overruns;snapshot_.audioUnderruns=audioUnderruns;
+              snapshot_.cgFresh=cg&&end-cg->captured<std::chrono::milliseconds(500);snapshot_.cgSequence=cg?cg->sequence:0;
               snapshot_.renderMs=std::chrono::duration<double,std::milli>(end-begin).count();snapshot_.io=stats;
               snapshot_.inputFps=rates;
               snapshot_.monitorFrames=monitorFrames;snapshot_.monitorFps=monitorRate;snapshot_.monitorSkipped=skipped;

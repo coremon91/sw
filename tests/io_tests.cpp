@@ -6,6 +6,10 @@ int main() try {
     for(int i=0;i<4;++i)in[i]={std::to_string(i),"input","test","",i,0,true,false,true,true};
     for(int i=0;i<2;++i)out[i]={std::to_string(i+4),"output","test","",i+4,0,false,true,true,true};
     sw::validateRouting(in,out,sw::Mode::Uhd);
+    std::array<sw::Endpoint,4> internalInputs{};std::array<sw::Endpoint,2> internalOutputs{};
+    internalInputs[3]=sw::mediaEndpoint();sw::validateRouting(internalInputs,internalOutputs,sw::Mode::Hd);
+    internalOutputs[0]=out[0];sw::validateRouting(internalInputs,internalOutputs,sw::Mode::Uhd);
+    internalInputs[0]=in[0];sw::validateRouting(internalInputs,internalOutputs,sw::Mode::Uhd);
     in[3]=sw::mediaEndpoint();sw::validateRouting(in,out,sw::Mode::Uhd);
     const auto first=in[0];in[0]=in[3];bool mediaRejected=false;
     try{sw::validateRouting(in,out,sw::Mode::Uhd);}catch(...){mediaRejected=true;}

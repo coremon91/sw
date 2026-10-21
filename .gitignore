@@ -42,3 +42,7 @@ local-qa/
 # OS files
 Thumbs.db
 .DS_Store
+
+# Python cache
+__pycache__/
+*.py[cod]

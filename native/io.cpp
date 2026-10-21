@@ -41,10 +41,11 @@ void validateRouting(const std::array<Endpoint,4>& inputs,const std::array<Endpo
     };
     for(size_t i=0;i<inputs.size();++i) {
         const auto& e=inputs[i];
+        if(e.id.empty())continue;
         if(e.backend=="media"&&(i!=3||e.id!="media:4"))throw std::runtime_error("Internal player is available on INPUT 4 only.");
         check(e,true);
     }
-    for(const auto& e:outputs) check(e,false);
+    for(const auto& e:outputs)if(!e.id.empty())check(e,false);
 }
 void validateReceiveRouting(const std::array<Endpoint,4>& inputs,Mode mode,const std::string& backend) {
     if(backend!="decklink"&&backend!="aja") throw std::runtime_error("Unknown receive backend.");

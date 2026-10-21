@@ -47,8 +47,18 @@ struct Dve {
     void sanitize();
 };
 struct Scene { int background = 0; Dve dve; };
+// Downstream key is independent of the A/B video transition.
+struct DownstreamKey {
+    int fill = 1, key = 2;
+    bool program = false, preview = false, invert = false, premultiplied = true;
+    bool internal = false;
+    bool luma = false; // Single Fill: derive alpha from black background.
+    float opacity = 1;
+    void sanitize();
+};
 struct RenderState {
     Scene program, preview, transitionFrom, transitionTo;
+    DownstreamKey dsk;
     bool transitioning = false;
     float mix = 0;
 };
@@ -58,6 +68,7 @@ public:
     const RenderState& state() const { return state_; }
     bool preview(int source);
     bool setDve(Dve dve);
+    void setDownstreamKey(DownstreamKey key);
     bool cut();
     bool autoMix(uint32_t outputFrames, const Format& format);
     void advance();

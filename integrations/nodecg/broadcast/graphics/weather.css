@@ -1,0 +1,12 @@
+* { box-sizing:border-box; }
+html,body { width:1920px; height:1080px; margin:0; overflow:hidden; background:transparent; color:#fff; font-family:"Malgun Gothic",Arial,sans-serif; }
+#scene { position:relative; width:1920px; height:1080px; opacity:0; transition:opacity .32s ease; }
+#scene.visible { opacity:1; }
+#weatherCard { position:absolute; right:112px; bottom:110px; width:100px; transition:bottom .35s ease; }
+.body { position:relative; transition:opacity .16s ease,transform .16s ease; }
+.body.changing { opacity:0; transform:translateY(6px); }
+#weatherIcon { position:absolute; width:72px; height:72px; left:50%; top:-65px; transform:translateX(-50%); object-fit:contain; filter:drop-shadow(0 2px 3px #0005); }
+.conditions { background:rgba(156,156,156,.82); height:82px; padding:5px 3px; display:flex; align-items:center; justify-content:center; flex-direction:column; text-shadow:0 1px 2px #555; }
+#weatherCity { display:block; width:100%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; text-align:center; font-size:27px; line-height:1.2; font-weight:500; }
+#weatherTemp { font-size:32px; line-height:1.18; font-weight:600; font-variant-numeric:tabular-nums; white-space:nowrap; }
+#weatherClock { display:block; height:38px; background:rgba(0,0,0,.82); text-align:center; font:600 29px/38px Arial,sans-serif; font-variant-numeric:tabular-nums; }

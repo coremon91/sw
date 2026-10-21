@@ -28,6 +28,16 @@ int main() try {
         require(recoverOutputFrame(104,101*f.frameDuration,f)==104,"recovery must not repeat on the following frame");
     }
     require(tickTime(60000).count()==1001000000000LL,"exact NTSC clock over 1001 seconds");
+    Switcher keyed;DownstreamKey key;key.program=true;key.preview=true;keyed.setDownstreamKey(key);
+    keyed.cut();require(keyed.state().dsk.program&&keyed.state().dsk.preview,"CUT preserves downstream key buses");
+    keyed.autoMix(2,Format::of(Mode::Uhd));key.program=false;keyed.setDownstreamKey(key);
+    keyed.advance();keyed.advance();
+    require(!keyed.state().dsk.program&&keyed.state().dsk.preview,"DSK can go off during AUTO independently of video");
+    key.fill=key.key;key.program=true;keyed.setDownstreamKey(key);
+    require(!keyed.state().dsk.program&&!keyed.state().dsk.preview,"same Fill and Key bypasses overlay");
+    key.internal=true;key.program=true;keyed.setDownstreamKey(key);
+    require(keyed.state().dsk.program,"internal RGBA does not require distinct SDI Fill and Key inputs");
+    keyed.reset();require(!keyed.state().dsk.program&&!keyed.state().dsk.preview,"new session starts with CG off");
     require(Format::of(Mode::Hd).interlaced&&Format::of(Mode::Hd).timeScale==30000,"HD frame rate vs field rate");
     AudioQueue audio;std::vector<int32_t> ramp(4000);for(size_t i=0;i<ramp.size();++i)ramp[i]=int32_t(i+1);
     audio.push(std::vector<int32_t>(ramp.begin(),ramp.begin()+1600));auto silence=audio.take(800);

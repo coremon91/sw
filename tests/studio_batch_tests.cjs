@@ -1,0 +1,27 @@
+const assert=require('node:assert/strict');
+const {take,out}=require('../integrations/nodecg/broadcast/dashboard/studio-batch.js');
+(async()=>{
+  let output=[],previews=[];
+  const op=(name,fail)=>({name,collect(){if(fail==='collect')throw Error('invalid');return {text:name};},async prepare(value){if(fail==='prepare')throw Error('disconnected');previews.push(value.text);},async show(value){if(fail==='show')throw Error('show failed');output.push(value.text);}});
+  await assert.rejects(take([]));
+  await assert.rejects(take([op('logo'),op('caption','collect')]));
+  assert.deepEqual(previews,[]);assert.deepEqual(output,[]);
+  await assert.rejects(take([op('logo'),op('caption','prepare')]));
+  assert.deepEqual(output,[],'a failed preview preparation cannot start output');
+  const result=await take([op('logo'),op('head'),op('caption')]);
+  assert.deepEqual(output,['logo','head','caption']);assert.deepEqual(result.failed,[]);
+  const partial=await take([op('weather'),op('emergency','show')]);
+  assert.deepEqual(partial,{on:['weather'],failed:['emergency']});
+  await assert.rejects(out([]));
+  const live={logo:true,head:true,caption:true};
+  const draftsBefore=[...previews];
+  const stopped=await out(['logo','head'].map(name=>({name,collect(){throw Error('invalid draft');},hide(){live[name]=false;}})));
+  assert.deepEqual(stopped,{off:['logo','head'],failed:[]});
+  assert.deepEqual(live,{logo:false,head:false,caption:true},'OUT changes only the selected layers');
+  assert.deepEqual(previews,draftsBefore,'OUT does not prepare or update drafts');
+  const stopPartial=await out([{name:'logo',hide(){throw Error('offline');}},{name:'caption',hide(){live.caption=false;}}]);
+  assert.deepEqual(stopPartial,{off:['caption'],failed:['logo']});
+  assert.equal(live.caption,false,'one failure must not prevent other layers from being removed');
+  console.log('PASS: batch OFF ignores invalid drafts, preserves unselected layers, reports partial failures.');
+  console.log('PASS: collect preflight, failed preparation blocks all TAKE, batch ON, partial failure reported.');
+})().catch(error=>{console.error(error);process.exitCode=1;});

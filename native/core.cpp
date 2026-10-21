@@ -53,7 +53,15 @@ void Dve::sanitize() {
     rotation = std::remainder(finite(rotation,0),360.f);
     border = std::clamp(finite(border,0),0.f,.05f);
 }
+void DownstreamKey::sanitize() {
+    if(fill<0||fill>3||key<0||key>3||(!luma&&fill==key)) {
+        if(!internal){program=false;preview=false;}
+        fill=1;key=2;
+    }
+    opacity=std::isfinite(opacity)?std::clamp(opacity,0.f,1.f):1.f;
+}
 Switcher::Switcher() { reset(); }
+void Switcher::setDownstreamKey(DownstreamKey key) { key.sanitize();state_.dsk=key; }
 void Switcher::reset() { state_={}; state_.preview.background=1; elapsed_=duration_=0; }
 bool Switcher::preview(int source) {
     if(source<0||source>3||state_.transitioning) return false;

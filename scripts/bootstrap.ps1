@@ -10,6 +10,10 @@ try {
         & $Python -m aqt install-qt windows desktop 6.8.3 win64_msvc2022_64 --archives qtbase qttools -O .deps/Qt
         if ($LASTEXITCODE) { throw 'Qt download failed.' }
     }
+    if (-not $SkipQt -and -not (Test-Path .deps/Qt/6.8.3/msvc2022_64/lib/cmake/Qt6WebEngineWidgets/Qt6WebEngineWidgetsConfig.cmake)) {
+        & $Python -m aqt install-qt windows desktop 6.8.3 win64_msvc2022_64 --modules qtwebengine qtwebchannel qtpositioning --archives qtdeclarative -O .deps/Qt
+        if ($LASTEXITCODE) { throw 'Qt WebEngine download failed.' }
+    }
     if (-not (Test-Path vendor-sdk/aja/.git)) {
         New-Item -ItemType Directory -Path vendor-sdk -Force | Out-Null
         git clone --depth 1 --branch ntv2_18_0_0 https://github.com/aja-video/libajantv2.git vendor-sdk/aja

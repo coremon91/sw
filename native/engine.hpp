@@ -21,11 +21,14 @@ struct Snapshot {
     bool running=false, starting=false, synthetic=true;
     bool receiveOnly=false;
     std::array<bool,4> assigned{};
+    std::array<bool,2> outputAssigned{};
     std::array<double,4> inputFps{};
     std::array<uint64_t,4> monitorSkipped{};
     std::array<uint32_t,4> audioBuffered{};
     std::array<double,2> outputAudioPeak{-120.,-120.};
     bool muted=true;
+    bool cgFresh=false;
+    uint64_t cgSequence=0;
     uint64_t audioOverflowFrames=0;
     RenderState state;
     std::array<Image,6> monitors;
@@ -45,6 +48,8 @@ public:
     Snapshot snapshot() const;
     void selectPreview(int);
     void setDve(Dve);
+    void setDownstreamKey(DownstreamKey);
+    void setCgFrame(RgbaFramePtr);
     void cut();
     void autoMix(unsigned frames);
     void setMuted(bool);
@@ -58,6 +63,7 @@ private:
     bool quit_=false, muted_=true;
     Format format_;
     Switcher switcher_;
+    RgbaFramePtr cgFrame_;
     Snapshot snapshot_;
 };
 }

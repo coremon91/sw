@@ -1,6 +1,6 @@
 # SW — Software Video Switcher
 
-Vizrt TriCaster의 제작 흐름을 참고하는 **Windows C++20 / Qt 6 / Direct3D 11** 소프트웨어 비디오 스위처입니다. 현재는 실제 영상 합성 엔진과 제조사 카드 I/O 어댑터를 포함하는 **0.1 개발 버전**입니다.
+Vizrt TriCaster의 제작 흐름을 참고하는 **Windows C++20 / Qt 6 / Direct3D 11** 소프트웨어 비디오 스위처입니다. 현재는 실제 영상 합성 엔진과 제조사 카드 I/O 어댑터를 포함하는 **0.3 개발 버전**입니다.
 
 ## 구현
 
@@ -43,4 +43,43 @@ Vizrt TriCaster의 제작 흐름을 참고하는 **Windows C++20 / Qt 6 / Direct
 
 [coremon91/sw](https://github.com/coremon91/sw)에서 관리합니다. 기능은 `codex/<작업명>` 브랜치로 개발하고 검증 내용을 PR에 남깁니다. GitHub Actions는 플랫폼 독립 코어 시험을 실행합니다.
 
-`native/`는 실제 구현, `tests/`는 엔진·포트 검사, `scripts/`는 빌드 도구입니다. 기존 `index.html`과 `src/`는 웹 시안으로 보존합니다. SDK 설치물, 빌드 산출물과 캡처 영상은 커밋에서 제외합니다.
+`native/`는 실제 구현, `tests/`는 엔진·포트 검사, `scripts/`는 빌드 도구입니다. `index.html`, `app.js`, `styles.css`는 Z Studio 웹 시안이며, 이전 시안 소스는 `src/`에 보존합니다. SDK 설치물, 빌드 산출물과 캡처 영상은 커밋에서 제외합니다.
+
+## 통합 CG 스튜디오
+
+NodeCG 기반 내부 CG 합성, 레이어별 편집, 로고 라이브러리, 일괄 ON/OFF, 날씨·재난 자막과 외부 Fill/Key 합성을 포함합니다.
+
+- [통합 스튜디오](docs/10-integrated-studio.ko.md)
+- [내부 CG 설정](docs/11-internal-cg.ko.md)
+- [방송 화면 배치](docs/12-broadcast-layout.ko.md)
+- [레이어 스튜디오](docs/13-layer-studio.ko.md)
+- [로고 라이브러리와 일괄 출력](docs/14-logo-library-batch.ko.md)
+- [CG 운용 기능](docs/15-cg-controls.ko.md)
+- [외부 Fill과 내부 플레이어 합성](docs/16-external-fill-player.ko.md)
+- [UHD 내부 CG 설정과 성능 제한](docs/17-internal-cg-uhd.ko.md)
+
+UHD CG 캡처는 기존 시험에서 약 9.5fps였으며, CG 갱신 59.94fps는 아직 달성하지 못했습니다. 실제 외부 SDI 송수신 검증은 별도로 필요합니다.
+
+## Z Studio 웹 대시보드 시안
+
+`Z:\4Kplayer`, `Z:\sw`, `Z:\nodecg`의 운영 흐름을 하나의 화면으로 구성한 방송 제어 대시보드 프로토타입입니다.
+
+### 실행
+
+별도의 설치 없이 정적 서버로 실행할 수 있습니다.
+
+```bash
+python3 -m http.server 4173
+```
+
+브라우저에서 <http://localhost:4173>을 엽니다.
+
+### 주요 기능
+
+- Program/Preview 소스 선택과 `TAKE` 전환 (`Space` 단축키 지원)
+- 4K Player 재생, 탐색, 반복 재생 컨트롤
+- NodeCG 이름/역할 업데이트 및 CG On/Off
+- 4K Player, Switcher, NodeCG 연결 상태 표시
+- 데스크톱과 태블릿 화면에 대응하는 반응형 레이아웃
+
+현재 버전은 프론트엔드 프로토타입입니다. 실제 장비 연동 시 각 버튼 이벤트를 4K Player, 스위처 및 NodeCG의 API/WebSocket 명령에 연결해야 합니다.

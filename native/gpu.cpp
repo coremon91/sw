@@ -11,10 +11,12 @@ using Microsoft::WRL::ComPtr;
 static void hr(HRESULT r,const char* text) { if(FAILED(r)) throw std::runtime_error(std::string(text)+" (HRESULT "+std::to_string(uint32_t(r))+")"); }
 static constexpr char shader[]=R"HLSL(
 struct Scene { float4 rect; float4 crop; float4 fx; int4 ids; };
-cbuffer Params : register(b0) { float4 sourceInfo[4]; Scene a; Scene b; float4 options; };
+cbuffer Params : register(b0) { float4 sourceInfo[4]; Scene a; Scene b; float4 options; int4 keyIds; float4 keyFx; };
 Texture2D<float4> s0:register(t0); Texture2D<float4> s1:register(t1);
 Texture2D<float4> s2:register(t2); Texture2D<float4> s3:register(t3);
 Texture2D<float4> composite:register(t4);
+Texture2D<float4> cgOverlay:register(t5);
+SamplerState cgSampler:register(s0);
 struct V { float4 position:SV_POSITION; float2 uv:TEXCOORD0; };
 V vertex(uint id:SV_VertexID) {
     V o; o.uv=float2((id<<1)&2,id&2); o.position=float4(o.uv*float2(2,-2)+float2(-1,1),0,1); return o;
@@ -65,6 +67,21 @@ float3 scene(Scene s,float2 uv) {
 float4 compose(V i):SV_TARGET {
     float3 color=scene(a,i.uv);
     [branch] if(options.x>0) color=lerp(color,scene(b,i.uv),options.x);
+    // Missing Fill or Key bypasses the overlay, including with Key invert.
+#if SW_INTERNAL_CG
+    [branch] if(keyIds.z!=0 && keyFx.w>.5) {
+        float4 overlay=cgOverlay.SampleLevel(cgSampler,i.uv,0);
+        color=saturate(color*(1-overlay.a*keyFx.x)+overlay.rgb*keyFx.x);
+    }
+#else
+    [branch] if(keyIds.z!=0 && sourceInfo[keyIds.x].w>.5 && (keyFx.z>.5 || sourceInfo[keyIds.y].w>.5)) {
+        float3 fill=sampleSource(keyIds.x,i.uv);
+        float alpha=keyFx.z>.5?smoothstep(.03,.12,max(fill.r,max(fill.g,fill.b))):dot(sampleSource(keyIds.y,i.uv),float3(.2126,.7152,.0722));
+        if(keyIds.w!=0) alpha=1-alpha;
+        alpha=saturate(alpha);
+        color=saturate(color*(1-alpha*keyFx.x)+fill*keyFx.x*(keyFx.y>.5?1:alpha));
+    }
+#endif
     return float4(color,1);
 }
 float3 yuv(float3 c) {
@@ -77,7 +94,7 @@ float4 pack(V i):SV_TARGET {
 }
 )HLSL";
 struct alignas(16) SceneParams { float rect[4],crop[4],fx[4]; int ids[4]; };
-struct alignas(16) Params { float sourceInfo[4][4]; SceneParams a,b; float options[4]; };
+struct alignas(16) Params { float sourceInfo[4][4]; SceneParams a,b; float options[4]; int keyIds[4]; float keyFx[4]; };
 static SceneParams params(const Scene& s) {
     const auto& d=s.dve;
     return {{d.x,d.y,d.width,d.height},{d.cropLeft,d.cropTop,d.cropRight,d.cropBottom},{d.rotation*3.1415926535f/180.f,d.opacity,d.border,0},{s.background,d.source,d.enabled?1:0,0}};
@@ -92,8 +109,11 @@ struct GpuCompositor::Impl {
     ComPtr<ID3D11Device> device;
     ComPtr<ID3D11DeviceContext> context;
     ComPtr<ID3D11VertexShader> vs;
-    ComPtr<ID3D11PixelShader> compose,pack;
+    ComPtr<ID3D11PixelShader> compose,composeInternal,pack;
     ComPtr<ID3D11Buffer> constants;
+    ComPtr<ID3D11SamplerState> cgSampler;
+    Surface cgSurface;
+    RgbaFramePtr heldCg;
     std::array<Surface,4> sources;
     std::array<Surface,2> scenes,packed;
     std::array<std::array<ComPtr<ID3D11Texture2D>,3>,2> readbacks;
@@ -134,9 +154,12 @@ struct GpuCompositor::Impl {
         else for(int y=0;y<f.format.height;++y)std::memcpy(static_cast<uint8_t*>(map.pData)+size_t(y)*map.RowPitch,f.data.data()+size_t(y)*f.stride,f.stride);
         context->Unmap(s.texture.Get(),0);
     }
-    ComPtr<ID3DBlob> compile(const char* entry,const char* model) {
+    ComPtr<ID3DBlob> compile(const char* entry,const char* model,bool internal=false) {
         ComPtr<ID3DBlob> blob,error;
-        HRESULT r=D3DCompile(shader,sizeof(shader)-1,"sw-compositor",nullptr,nullptr,entry,model,D3DCOMPILE_OPTIMIZATION_LEVEL3,0,&blob,&error);
+        // Keep the two key paths in separate shader variants. Combining both
+        // with the multi-tap source filters exhausts FXC's optimizer stack.
+        const D3D_SHADER_MACRO defines[]={{"SW_INTERNAL_CG",internal?"1":"0"},{nullptr,nullptr}};
+        HRESULT r=D3DCompile(shader,sizeof(shader)-1,"sw-compositor",defines,nullptr,entry,model,D3DCOMPILE_OPTIMIZATION_LEVEL3,0,&blob,&error);
         if(FAILED(r)) throw std::runtime_error(error?std::string((char*)error->GetBufferPointer(),error->GetBufferSize()):"Shader compilation failed");
         return blob;
     }
@@ -173,9 +196,15 @@ void GpuCompositor::initialize(Format format,bool pipelined) {
     auto v=g.compile("vertex","vs_5_0"),c=g.compile("compose","ps_5_0"),p=g.compile("pack","ps_5_0");
     hr(g.device->CreateVertexShader(v->GetBufferPointer(),v->GetBufferSize(),nullptr,&g.vs),"Create vertex shader");
     hr(g.device->CreatePixelShader(c->GetBufferPointer(),c->GetBufferSize(),nullptr,&g.compose),"Create compositor shader");
+    auto internal=g.compile("compose","ps_5_0",true);
+    hr(g.device->CreatePixelShader(internal->GetBufferPointer(),internal->GetBufferSize(),nullptr,&g.composeInternal),"Create internal CG compositor");
     hr(g.device->CreatePixelShader(p->GetBufferPointer(),p->GetBufferSize(),nullptr,&g.pack),"Create YUV shader");
     D3D11_BUFFER_DESC bd{};bd.ByteWidth=sizeof(Params);bd.Usage=D3D11_USAGE_DEFAULT;bd.BindFlags=D3D11_BIND_CONSTANT_BUFFER;
     hr(g.device->CreateBuffer(&bd,nullptr,&g.constants),"Create parameters");
+    D3D11_SAMPLER_DESC sampler{};sampler.Filter=D3D11_FILTER_MIN_MAG_MIP_LINEAR;
+    sampler.AddressU=sampler.AddressV=sampler.AddressW=D3D11_TEXTURE_ADDRESS_CLAMP;sampler.MaxLOD=D3D11_FLOAT32_MAX;
+    hr(g.device->CreateSamplerState(&sampler,&g.cgSampler),"Create CG sampler");
+    auto* cgSampler=g.cgSampler.Get();g.context->PSSetSamplers(0,1,&cgSampler);
     for(int i=0;i<2;++i) {
         g.scenes[i]=g.create(format.width,format.height,true,false);
         g.packed[i]=g.create(format.width/2,format.height,true,true);
@@ -190,9 +219,24 @@ void GpuCompositor::initialize(Format format,bool pipelined) {
     g.context->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
     g.context->VSSetShader(g.vs.Get(),nullptr,0);
 }
-GpuResult GpuCompositor::render(const std::array<FramePtr,4>& frames,const RenderState& state,uint64_t tick,bool showMonitors,bool produceOutputs) {
+GpuResult GpuCompositor::render(const std::array<FramePtr,4>& frames,const RenderState& state,uint64_t tick,bool showMonitors,bool produceOutputs,RgbaFramePtr cg) {
     auto& g=*impl_;GpuResult result;
     const int field=g.format.interlaced?int(tick%2):0;
+    const bool cgValid=cg&&cg->width>0&&cg->height>0&&cg->width<=8192&&cg->height<=8192&&
+        cg->rgba.size()==size_t(cg->width)*cg->height*4&&std::chrono::steady_clock::now()-cg->captured<std::chrono::milliseconds(500);
+    // Hold the same progressive HTML frame for both fields of an HD frame.
+    // Invalid data is removed immediately, including between fields.
+    if(!cgValid)g.heldCg.reset();
+    else if(!g.format.interlaced||field==0) {
+        if(cg!=g.heldCg) {
+            if(g.cgSurface.width!=cg->width||g.cgSurface.height!=cg->height)g.cgSurface=g.createUpload(cg->width,cg->height);
+            D3D11_MAPPED_SUBRESOURCE mapped{};hr(g.context->Map(g.cgSurface.texture.Get(),0,D3D11_MAP_WRITE_DISCARD,0,&mapped),"Map HTML CG");
+            for(int y=0;y<cg->height;++y)std::memcpy(static_cast<uint8_t*>(mapped.pData)+size_t(y)*mapped.RowPitch,cg->rgba.data()+size_t(y)*cg->width*4,size_t(cg->width)*4);
+            g.context->Unmap(g.cgSurface.texture.Get(),0);
+        }
+        g.heldCg=std::move(cg);
+    }
+    auto* cgView=g.heldCg?g.cgSurface.resource.Get():nullptr;g.context->PSSetShaderResources(5,1,&cgView);
     // Hold one captured interlaced frame over both output fields.
     if(!g.format.interlaced||field==0) for(int i=0;i<4;++i) {
         if(frames[i]) {
@@ -213,12 +257,18 @@ GpuResult GpuCompositor::render(const std::array<FramePtr,4>& frames,const Rende
     g.context->PSSetShaderResources(0,4,inputViews);
     g.p.options[1]=float(tick%2);g.p.options[2]=g.format.interlaced?1.f:0.f;
     g.p.options[3]=0;
+    auto dsk=state.dsk;dsk.sanitize();
+    auto* compositor=dsk.internal?g.composeInternal.Get():g.compose.Get();
+    g.p.keyIds[0]=dsk.fill;g.p.keyIds[1]=dsk.key;g.p.keyIds[3]=dsk.invert?1:0;
+    g.p.keyFx[0]=dsk.opacity;g.p.keyFx[1]=dsk.premultiplied?1.f:0.f;
+    g.p.keyFx[2]=dsk.luma?1.f:0.f;g.p.keyFx[3]=g.heldCg?1.f:0.f;
     if(produceOutputs)for(int out=0;out<2;++out) {
+        g.p.keyIds[2]=(out==0?dsk.program:dsk.preview)?1:0;
         const bool mix=out==0&&state.transitioning;
         const auto& scene=out==0?state.program:state.preview;
         g.p.a=params(mix?state.transitionFrom:scene);g.p.b=params(mix?state.transitionTo:scene);g.p.options[0]=mix?state.mix:0;
         ID3D11ShaderResourceView* empty=nullptr;g.context->PSSetShaderResources(4,1,&empty);
-        g.draw(g.scenes[out],g.compose.Get());
+        g.draw(g.scenes[out],compositor);
         auto* view=g.scenes[out].resource.Get();g.context->PSSetShaderResources(4,1,&view);
         g.draw(g.packed[out],g.pack.Get());g.context->PSSetShaderResources(4,1,&empty);
         if(!g.format.interlaced||field==1) {
@@ -245,11 +295,12 @@ GpuResult GpuCompositor::render(const std::array<FramePtr,4>& frames,const Rende
     if(showMonitors) {
       g.p.options[3]=1;
       for(int i=0;i<6;++i) {
+        g.p.keyIds[2]=(i==4?dsk.program:i==5?dsk.preview:false)?1:0;
         Scene scene;scene.background=i<4?i:0;
         bool mix=i==4&&state.transitioning;
         if(i>=4) scene=i==4?state.program:state.preview;
         g.p.a=params(mix?state.transitionFrom:scene);g.p.b=params(mix?state.transitionTo:scene);g.p.options[0]=mix?state.mix:0;
-        g.draw(g.monitor,g.compose.Get(),(i%3)*480,(i/3)*270,480,270);
+        g.draw(g.monitor,compositor,(i%3)*480,(i/3)*270,480,270);
       }
       g.context->CopyResource(g.monitor.staging.Get(),g.monitor.texture.Get());
       if(!g.pipelined||g.monitorReady) {

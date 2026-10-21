@@ -1,0 +1,66 @@
+# SW 통합 스위처 — 영상 재생 + NodeCG + Fill/Key
+
+> 이 문서는 0.2의 외부 SDI Fill/Key 구성 안내입니다. 0.3의 기본 방식은 카드 없는 내부 CG 합성이며, 새 패키지의 `내부CG사용안내.md` 또는 [내부 CG 안내](11-internal-cg.ko.md)를 따르세요.
+
+기존 Windows SW에 플레이어와 NodeCG 조작 화면, CG Fill/Key 합성을 통합한 개발 버전입니다. 소스 작업 위치는 `C:\Users\KBC-tech\Documents\ChatGPT\SW`입니다. 기존 웹 시안과 Z 드라이브의 SW 원본은 별도로 보존합니다.
+
+## 실제 영상 경로
+
+```text
+카메라 ──────────────────────────── INPUT 1 ─┐
+NodeCG → CasparCG → SDI Fill ─────── INPUT 2  │
+                 → SDI Key ──────── INPUT 3  ├─ SW GPU 합성 → PGM SDI
+영상 파일 → SW 내장 플레이어 ────── INPUT 4 ─┘             → PVW SDI
+```
+
+원본 4Kplayer 탭도 유지합니다. 원본 플레이어를 사용할 때는 전용 DeckLink 출력에서 SW INPUT 4로 SDI를 연결해야 합니다. 원본 창의 재생 영상이 SW에 메모리로 자동 전달되지는 않습니다. SDI 포트를 절약하려면 같은 플레이어 탭에서 **SW 파일 입력 · INPUT 4 직접 연결**을 선택합니다. 두 플레이어 모드의 재생 상태는 독립적입니다.
+
+네 입력 중 두 개가 CG Fill/Key용이므로 이 구성은 카메라 1개와 플레이어 1개를 받습니다. 더 많은 카메라를 동시에 사용하려면 입력 슬롯과 카드 포트를 확장하거나 HTML 직접 합성 경로를 추가해야 합니다.
+
+## 사용 순서
+
+1. `sw_switcher.exe` 실행 → **CG · NodeCG** 탭. 기본 폴더는 `Z:\Nodecg`, 주소는 `http://127.0.0.1:9090/dashboard/`입니다.
+2. NodeCG 서버가 꺼져 있으면 **NodeCG 시작**. 서버가 이미 떠 있으면 새로고침합니다. 버튼으로 실행한 서버는 SW 종료 후에도 유지되며 로그는 `Z:\Nodecg\logs\sw-*.log`입니다.
+3. CasparCG의 카드 포트를 확인하고 필요할 때 **CasparCG 시작 · SDI 출력**을 누릅니다. 이 버튼은 기존 `casparcg.config`로 서버를 실행하여 실제 SDI 출력을 시작합니다. 로컬 5250 포트가 이미 사용 중이면 중복 실행하지 않습니다.
+4. 스위처 탭에서 세션 규격과 SDI 포트를 지정합니다. Fill/Key는 서로 다른 입력이어야 하며 화면 상단에서 변경할 수 있습니다. 기본은 Fill=INPUT 2, Key=INPUT 3입니다.
+5. 플레이어 탭에서 영상 선택 → 세션 시작 → CUE/재생. INPUT 4를 PVW로 선택하고 **CUT / AUTO MIX**로 PGM에 전환합니다.
+6. NodeCG 탭에서 자막·선거·재난·로고·날씨를 편집하고 **TAKE**합니다. 이는 CasparCG의 CG 출력 제어입니다.
+7. 상단 **CG PVW**로 SW 미리보기 합성을 확인한 뒤 **CG ON · PGM**으로 최종 영상에 얹습니다. **CG OFF · PGM**은 SW 합성만 해제합니다. NodeCG의 **OUT**은 CasparCG 그래픽을 퇴장시킵니다.
+
+CG 조작 중 스위처 Space/숫자/Enter 단축키는 비활성화됩니다. 탭을 바꿔도 스위처 엔진과 플레이어 재생은 유지됩니다.
+
+## 포맷과 카드 배정
+
+- 현재 Z 드라이브 CasparCG 설정은 **HD 1080i59.94**, DeckLink device 2, external Fill/Key, `straight-alpha-output=false`입니다. 첫 연결 시험은 SW도 HD로 맞추세요.
+- SW의 UHD 2160p59.94 선택은 유지합니다. UHD로 사용할 때는 CasparCG, Fill/Key, 카메라, 플레이어와 실제 카드 포트가 동일한 규격이어야 합니다. 이 작업에서 CasparCG 규격이나 카드 라우팅은 변경하지 않았습니다.
+- **Premultiplied**는 현재 CasparCG 설정에 맞춰 기본 켜짐입니다. straight alpha를 출력하도록 별도 변경했다면 끕니다. Key 반전은 실제 Key 극성이 반대일 때만 사용합니다.
+- 플레이어, CasparCG, SW가 같은 물리 출력 포트를 동시에 사용하면 안 됩니다. 현재 SW의 실제 SDI 세션에는 PGM과 PVW 출력 포트가 모두 필요합니다. 포트 수는 카드 모델과 프로파일에 따라 별도로 확보해야 합니다.
+- CG는 화면 전환 뒤에 합성하므로 CUT/AUTO로 영상 소스를 바꿔도 CG ON/OFF는 유지됩니다. 새 세션은 PGM CG OFF로 시작합니다.
+- Fill 또는 Key 수신이 없거나 500ms 이상 오래된 경우 합성을 우회하고 배경 영상을 유지합니다. 신호가 복구되면 기존 ON 상태에 따라 CG 합성을 재개합니다. 복구 후에도 CG를 내린 채 유지하려면 CG OFF를 누릅니다.
+- 기존 엔진의 8-bit UYVY / Rec.709 SDR 경로를 사용합니다. Genlock, Fill/Key의 실제 시간 정렬, 10-bit 및 장시간 UHD 운용 검증을 대신하지 않습니다.
+
+## 개발 및 확인
+
+2026-09-24 이 PC의 읽기 전용 장치 조회에서는 DeckLink 4K Extreme 12G 2개와 AJA 장치 없음이 보고되었습니다. 현재 장치 수만으로 위의 카메라 + Fill/Key + PGM/PVW 전체 SDI 배선을 구성할 수는 없습니다. 추가 수신 카드가 설치된 방송 PC에서 연결하거나, 별도 개발을 통해 HTML 직접 합성 및 출력 포트 선택 구조로 확장해야 합니다. 현재 구현은 HTML을 영상 프레임으로 직접 합성하지 않습니다.
+
+Qt 6.8.3 WebEngine Widgets가 추가로 필요합니다. `scripts/bootstrap.ps1`에서 의존성을 설치하고 아래처럼 별도 패키지를 만듭니다.
+
+```powershell
+.\scripts\build.ps1 -Destination dist/SW-integrated
+.\scripts\bundle-player.ps1 -PlayerPackage 'Z:\4Kplayer\KBC_Tech_Player_GeForceRTX5060_PORTABLE_20260907' -Destination dist/SW-integrated
+```
+
+GPU 회귀 검사는 카드 출력 없이 progressive/interlaced, 직접/파이프라인 출력, PGM/PVW 독립 합성, 검정/흰색/중간 Key, 반전, premultiplied/straight alpha, 투명도 및 신호 소실을 검사합니다. 실제 SDI 배선과 외부 수신기에서 영상·음성·동기를 확인해야 현장 운용 상태를 판정할 수 있습니다.
+
+NodeCG는 기존 2.8.0 버전을 유지하며 비어 있던 의존성을 `npm install --package-lock=false --ignore-scripts`와 `npm rebuild better-sqlite3`로 복원했습니다. 번들, CG 내용, CasparCG 설정은 변경하지 않았습니다.
+
+### 이번 작업의 검증 결과
+
+- Windows Release 빌드 성공. CTest 5개(코어, 미디어 생성, 미디어 디코드, GPU Fill/Key, 포트 검증) 통과.
+- 실제 NodeCG 2.8.0 서버와 번들 구동, 대시보드 HTTP 200 및 SW 안의 Qt WebEngine 화면 표시 확인.
+- SW 테스트 패턴 PGM/PVW와 입력 4개 화면 표시 확인. 좁은 창/넓은 창의 상태 표시 영역 크기 안정성 검사 통과.
+- 2026-09-07 원본 플레이어 실행 파일의 SHA-256 일치 확인 후 별도 패키지에 포함.
+- 이번 작업에서는 CasparCG의 SDI 출력, 물리 Fill/Key 수신, 원본 플레이어의 SDI 재생, 외부 수신기로의 최종 PGM 송출은 시험하지 않았습니다.
+- 기존 작업 폴더의 README.md 및 index.html에 있던 병합 충돌 표시는 이 네이티브 변경과 분리하여 그대로 보존했습니다.
+
+구현 참고: [Qt WebEngine Widgets](https://doc.qt.io/qt-6.8/qtwebenginewidgets-module.html). 브라우저는 CG 대시보드 조작용이며, 실제 영상은 위의 SDI Fill/Key 경로로 합성합니다.
