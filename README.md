@@ -22,9 +22,13 @@
 | `SW-integrated-20260924.zip` | 162 | 166,082,405 |
 | `SW-internal-CG-20260924.zip` | 282 | 177,626,735 |
 
-현재 상태: **로컬 압축 및 ZIP 무결성 검증 완료, GitHub Releases 첨부 업로드 대기**. 릴리스 첨부가 완료되기 전에는 GitHub에 실행본 전체가 백업된 상태가 아닙니다.
+현재 상태: **GitHub Releases 전체 백업 업로드 및 SHA-256 일치 확인 완료**.
 
-전체 ZIP은 각 원본 폴더의 파일을 포함하며 `SW/.git/`만 제외했습니다. 각 ZIP의 SHA-256은 `SHA256SUMS.txt`에 있습니다. 원본의 모든 파일 경로·크기·SHA-256을 담은 `*.manifest.json`도 압축 파일과 함께 준비되어 있습니다.
+[전체 백업 다운로드 — z-sw-backup-20261021](https://github.com/coremon91/sw/releases/tag/z-sw-backup-20261021)
+
+릴리스의 **Assets**에서 `SW.zip`, `SW-integrated-20260924.zip`, `SW-internal-CG-20260924.zip`을 받으세요. GitHub가 자동 생성하는 `Source code (zip)`은 전체 실행본이 아닙니다.
+
+전체 ZIP은 각 원본 폴더의 파일을 포함하며 `SW/.git/`만 제외했습니다. 각 ZIP의 SHA-256은 `SHA256SUMS.txt`에 있습니다. 원본의 모든 파일 경로·크기·SHA-256을 담은 `*.manifest.json`도 릴리스에 함께 첨부했습니다.
 
 복원할 때는 해당 ZIP을 `Z:\SW`에 풀어 동일한 폴더 구조로 사용합니다. SDK·드라이버·Visual C++ 런타임 등 시스템에 별도로 설치되는 항목은 파일 복원과 별개입니다.
 
