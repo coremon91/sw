@@ -1,0 +1,4 @@
+#pragma once
+// Import the public COM type library supplied by the installed Desktop Video driver.
+// No manufacturer SDK headers or binaries are redistributed in this repository.
+#import "@SW_DECKLINK_DLL@" raw_interfaces_only named_guids rename_namespace("bmd")

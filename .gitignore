@@ -7,6 +7,9 @@ CMakeUserPresets.json
 
 # Build products and tools
 node_modules/
+.tools/
+.deps/
+aqtinstall.log
 build/
 build-*/
 out/
