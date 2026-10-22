@@ -66,6 +66,7 @@ public:
     bool preview(int source);
     bool setDve(Dve dve);
     bool setKeyFill(KeyFill keyFill);
+    bool setProgramCg(bool enabled);
     bool cut();
     bool autoMix(uint32_t outputFrames, const Format& format);
     void advance();

@@ -69,9 +69,17 @@ int main(int argc,char** argv) {
                 inputs[3]=matte;auto split=render();
                 for(int y:{100,101}) {require(std::abs(int(luma(split.output[1],100,y))-60)<=3,"Spatial black matte failed");require(std::abs(int(luma(split.output[1],f.width-100,y))-180)<=3,"Spatial white matte failed");}
                 require(!split.monitors[5].rgba.empty(),"CG preview monitor missing");
-                solid(3,235);routing.cut();auto cut=render();require(std::abs(int(luma(cut.output[0],100,100))-180)<=3,"CUT did not commit CG");
-                routing.autoMix(2,f);for(int n=0;n<2*f.ticksPerFrame();++n)routing.advance();auto mixed=render();
-                require(std::abs(int(luma(mixed.output[0],100,100))-60)<=3,"AUTO did not remove CG with scene");
+                solid(3,235);routing.cut();auto cut=render();require(std::abs(int(luma(cut.output[0],100,100))-60)<=3,"CUT unexpectedly enabled CG");cut={};
+                routing.setProgramCg(true);auto on=render();require(std::abs(int(luma(on.output[0],100,100))-180)<=3,"Independent CG ON failed");on={};
+                solid(0,100);solid(3,126);routing.autoMix(4,f);
+                for(int n=0;n<2*f.ticksPerFrame();++n)routing.advance();auto middle=render();
+                require(std::abs(int(luma(middle.output[0],100,100))-130)<=4,"CG must remain above the halfway background dissolve");middle={};
+                routing.setProgramCg(false);auto off=render();require(std::abs(int(luma(off.output[0],100,100))-80)<=3,"CG OFF during AUTO altered background mix");off={};
+                routing.setProgramCg(true);auto again=render();require(std::abs(int(luma(again.output[0],100,100))-130)<=4,"CG ON during AUTO failed");again={};
+                for(int n=0;n<2*f.ticksPerFrame();++n)routing.advance();auto mixed=render();
+                require(std::abs(int(luma(mixed.output[0],100,100))-140)<=4,"AUTO completion changed CG layer");mixed={};
+                routing.cut();auto held=render();require(std::abs(int(luma(held.output[0],100,100))-120)<=4,"CUT failed to retain CG");held={};
+                routing.setProgramCg(false);auto clean=render();require(std::abs(int(luma(clean.output[0],100,100))-60)<=3,"CG OFF failed to reveal unchanged background");
                 std::cout<<"CG Key/Fill pixel checks passed: "<<f.label()<<"\n";
             }
             return 0;

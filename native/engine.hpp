@@ -48,6 +48,7 @@ public:
     void selectPreview(int);
     void setDve(Dve);
     void setKeyFill(KeyFill);
+    void setProgramCg(bool);
     void cut();
     void autoMix(unsigned frames);
     void setMuted(bool);

@@ -74,11 +74,25 @@ bool Switcher::setKeyFill(KeyFill keyFill) {
 }
 bool Switcher::cut() {
     if(state_.transitioning) return false;
-    std::swap(state_.program,state_.preview); return true;
+    std::swap(state_.program.background,state_.preview.background);
+    std::swap(state_.program.dve,state_.preview.dve); return true;
+}
+bool Switcher::setProgramCg(bool enabled) {
+    if(enabled) {
+        auto key=state_.preview.keyFill;key.enabled=true;key.sanitize();
+        if(!key.enabled)return false;
+        state_.program.keyFill=key;
+    } else state_.program.keyFill.enabled=false;
+    if(state_.transitioning) {
+        state_.transitionFrom.keyFill=state_.program.keyFill;
+        state_.transitionTo.keyFill=state_.program.keyFill;
+    }
+    return true;
 }
 bool Switcher::autoMix(uint32_t frames,const Format& f) {
     if(state_.transitioning||frames==0||frames>600) return false;
     state_.transitionFrom=state_.program; state_.transitionTo=state_.preview;
+    state_.transitionTo.keyFill=state_.program.keyFill;
     state_.transitioning=true; state_.mix=0;
     elapsed_=0; duration_=uint64_t(frames)*f.ticksPerFrame(); return true;
 }
@@ -87,7 +101,9 @@ void Switcher::advance() {
     ++elapsed_;
     state_.mix=std::min(1.f,float(elapsed_)/float(duration_));
     if(elapsed_>=duration_) {
+        const auto previewKey=state_.preview.keyFill;
         state_.program=state_.transitionTo; state_.preview=state_.transitionFrom;
+        state_.preview.keyFill=previewKey;
         state_.transitioning=false; state_.mix=0;
     }
 }

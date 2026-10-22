@@ -38,9 +38,11 @@ try {
     Copy-Item -LiteralPath docs/03-implementation.ko.md -Destination dist/SW/사용안내.md
     Copy-Item -LiteralPath docs/10-cg-keyfill.ko.md -Destination dist/SW/CG-KeyFill-사용안내.md
     Copy-Item -LiteralPath docs/11-free-routing.ko.md -Destination dist/SW/입출력선택-사용안내.md
+    Copy-Item -LiteralPath docs/16-independent-cg.ko.md -Destination dist/SW/0.6-독립CG-사용안내.md
+    Copy-Item -LiteralPath docs/15-td-operation-roadmap.ko.md -Destination dist/SW/TD-운용-개선목록.md
     Copy-Item -LiteralPath docs/13-preview-refresh.ko.md -Destination dist/SW/0.5-미리보기-사용안내.md
     Copy-Item -LiteralPath docs/12-cuda-transfer.ko.md -Destination dist/SW/0.4-CUDA-사용안내.md
-    Copy-Item -LiteralPath scripts/SW-0.5-CUDA.cmd,scripts/SW-0.5-D3D11.cmd -Destination dist/SW/
+    Copy-Item -LiteralPath scripts/SW-0.6-CUDA.cmd,scripts/SW-0.6-D3D11.cmd -Destination dist/SW/
     Copy-Item -LiteralPath scripts/UHD-loopback.cmd -Destination dist/SW/
     Copy-Item -LiteralPath scripts/DeckLink-receive.cmd -Destination dist/SW/
     Copy-Item -LiteralPath scripts/KONA-receive.cmd -Destination dist/SW/

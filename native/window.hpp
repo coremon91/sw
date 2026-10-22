@@ -80,5 +80,7 @@ private:
     QComboBox *fillSource_,*keySource_;
     QDoubleSpinBox* keyOpacity_;
     QLabel* keyFillStatus_;
+    QPushButton *cgOn_,*cgOff_;
+    QLabel* cgOnAir_;
 };
 }

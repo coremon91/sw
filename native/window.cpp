@@ -41,7 +41,7 @@ void Monitor::paintEvent(QPaintEvent*) {
     p.setFont(QFont("Segoe UI",9,QFont::DemiBold));p.drawText(12,21,title_);p.drawText(QRect(65,3,width()-76,26),Qt::AlignRight|Qt::AlignVCenter,status_);
 }
 Window::Window(int receiver) {
-    setWindowTitle("SW 0.5 CUDA / CG / Free Routing — Software Video Switcher");resize(1480,940);
+    setWindowTitle("SW 0.6 CUDA / CG / Free Routing — Software Video Switcher");resize(1480,940);
     setStyleSheet(R"(QMainWindow,QWidget{background:#111820;color:#dce3ec;font-family:'Segoe UI';font-size:12px;}QGroupBox{border:1px solid #303e4e;border-radius:6px;margin-top:18px;padding:10px;}QGroupBox::title{subcontrol-origin:margin;left:10px;color:#8fa3b9;}QPushButton{background:#263444;border:1px solid #3d5064;padding:9px 14px;border-radius:4px;font-weight:600;}QPushButton:hover{background:#354960;}QPushButton:disabled{color:#627084;background:#1a242f;}QComboBox,QSpinBox,QDoubleSpinBox{background:#1b2835;border:1px solid #3d5064;border-radius:3px;padding:5px;}QLabel#headline{font-size:23px;font-weight:700;}QCheckBox{spacing:8px;}QScrollArea{border:0;})");
     tabs_=new QTabWidget;setCentralWidget(tabs_);
     auto* scroll=new QScrollArea;scroll->setWidgetResizable(true);tabs_->addTab(scroll,"스위처");
@@ -52,7 +52,7 @@ Window::Window(int receiver) {
     connect(playerMode_,qOverload<int>(&QComboBox::currentIndexChanged),playerStack,&QStackedWidget::setCurrentIndex);
     auto* root=new QWidget;scroll->setWidget(root);auto* layout=new QVBoxLayout(root);layout->setContentsMargins(20,14,20,14);layout->setSpacing(12);
     auto* header=new QHBoxLayout;auto* title=new QLabel("SW   /   VIDEO SWITCHER");title->setObjectName("headline");header->addWidget(title);header->addStretch();
-    auto* version=new QLabel("C++ · GPU 합성  |  개발 버전 0.5 · D3D11 합성 / CUDA 전송 · 입출력 선택");version->setStyleSheet("color:#8fa3b9;");header->addWidget(version);layout->addLayout(header);
+    auto* version=new QLabel("C++ · GPU 합성  |  개발 버전 0.6 · D3D11 합성 / CUDA 전송 · 입출력 선택");version->setStyleSheet("color:#8fa3b9;");header->addWidget(version);layout->addLayout(header);
     auto* monitorRateRow=new QHBoxLayout;
     monitorRateRow->addWidget(new QLabel("미리보기 갱신"));
     auto* monitorRate=new QComboBox;
@@ -78,6 +78,14 @@ Window::Window(int receiver) {
     mute_=new QCheckBox("출력 음소거");mute_->setChecked(true);
     controls->addWidget(cut_);controls->addWidget(auto_);controls->addWidget(duration_);controls->addSpacing(20);controls->addWidget(mute_);controls->addStretch();
     controls->addWidget(new QLabel("DVE는 PVW에서 편집 → CUT / AUTO로 PGM에 적용"));layout->addLayout(controls);
+    auto* cgLive=new QHBoxLayout;
+    cgOn_=new QPushButton("CG ON · PVW 설정 적용");cgOff_=new QPushButton("CG OFF");cgOnAir_=new QLabel("CG OFF AIR");
+    cgOn_->setMinimumHeight(44);cgOff_->setMinimumHeight(44);
+    cgOn_->setToolTip("PVW의 Fill/Key 설정을 PGM에 즉시 적용합니다. 배경은 전환하지 않습니다.");
+    cgOff_->setToolTip("PGM의 CG만 내립니다. 배경과 PVW CG 설정은 유지됩니다.");
+    cgLive->addWidget(cgOn_);cgLive->addWidget(cgOff_);cgLive->addWidget(cgOnAir_,1);layout->addLayout(cgLive);
+    connect(cgOn_,&QPushButton::clicked,this,[this]{engine_.setProgramCg(true);});
+    connect(cgOff_,&QPushButton::clicked,this,[this]{engine_.setProgramCg(false);});
     audioStatus_=new QLabel;audioStatus_->setWordWrap(true);audioStatus_->setFixedHeight(audioStatus_->fontMetrics().lineSpacing()*2+6);audioStatus_->setSizePolicy(QSizePolicy::Ignored,QSizePolicy::Fixed);layout->addWidget(audioStatus_);
     connect(cut_,&QPushButton::clicked,this,[this]{engine_.cut();});connect(auto_,&QPushButton::clicked,this,[this]{engine_.autoMix(duration_->value());});connect(mute_,&QCheckBox::toggled,this,[this](bool m){engine_.setMuted(m);});
     auto* cutKey=new QShortcut(QKeySequence(Qt::Key_Space),this);connect(cutKey,&QShortcut::activated,cut_,&QPushButton::click);
@@ -109,9 +117,9 @@ Window::Window(int receiver) {
     const QStringList labels={"X 위치","Y 위치","가로","세로","왼쪽 크롭","위 크롭","오른쪽 크롭","아래 크롭","회전 °","불투명도","테두리"};
     for(int i=0;i<11;++i) { auto* spin=new QDoubleSpinBox;dveValues_[i]=spin;spin->setDecimals(3);spin->setSingleStep(i==8?5:.01);spin->setRange(i<2?-1:0,i==8?360:(i<4?2:1));if(i==8) spin->setMinimum(-360);dg->addWidget(new QLabel(labels[i]),1+i/2,(i%2)*2);dg->addWidget(spin,1+i/2,(i%2)*2+1);connect(spin,qOverload<double>(&QDoubleSpinBox::valueChanged),this,[this]{applyDve();}); }
     connect(dveEnabled_,&QCheckBox::toggled,this,[this]{applyDve();});connect(dveSource_,qOverload<int>(&QComboBox::currentIndexChanged),this,[this]{applyDve();});lower->addWidget(dveBox,2);
-    auto* keyBox=new QGroupBox("CG KEY / FILL · PVW에서 설정 후 CUT / AUTO");keyFillPanel_=keyBox;
+    auto* keyBox=new QGroupBox("CG KEY / FILL · PVW에서 확인 → CG ON으로 송출 적용");keyFillPanel_=keyBox;
     auto* kg=new QGridLayout(keyBox);
-    keyFillEnabled_=new QCheckBox("CG 합성 사용");fillSource_=new QComboBox;keySource_=new QComboBox;
+    keyFillEnabled_=new QCheckBox("PVW CG 미리보기");fillSource_=new QComboBox;keySource_=new QComboBox;
     for(auto* combo:{fillSource_,keySource_})combo->addItems({"INPUT 1","INPUT 2","INPUT 3","INPUT 4"});
     fillSource_->setCurrentIndex(2);keySource_->setCurrentIndex(3);
     keyInvert_=new QCheckBox("Key 반전");keyPremultiplied_=new QCheckBox("Premultiplied Fill");
@@ -214,6 +222,12 @@ void Window::applyKeyFill() {
 void Window::update() {
     auto s=engine_.snapshot();const bool busy=s.running||s.starting;session_->setEnabled(!busy);start_->setEnabled(!busy);stop_->setEnabled(busy);cut_->setEnabled(s.running&&!s.state.transitioning);auto_->setEnabled(cut_->isEnabled());dvePanel_->setEnabled(s.running&&!s.state.transitioning);
     keyFillPanel_->setEnabled(s.running&&!s.state.transitioning);
+    const auto& liveCg=s.state.program.keyFill;const auto& stagedCg=s.state.preview.keyFill;
+    cgOn_->setEnabled(s.running&&stagedCg.fillSource!=stagedCg.keySource&&s.signal[stagedCg.fillSource]&&s.signal[stagedCg.keySource]);
+    cgOff_->setEnabled(s.running&&liveCg.enabled);
+    const bool cgSignal=s.signal[liveCg.fillSource]&&s.signal[liveCg.keySource];
+    cgOnAir_->setText(!s.running?"CG STOPPED":!liveCg.enabled?"CG OFF AIR":!cgSignal?"CG ON · 입력 신호 없음":QString("CG ON AIR · Fill IN%1 / Key IN%2 · 배경 전환과 독립").arg(liveCg.fillSource+1).arg(liveCg.keySource+1));
+    cgOnAir_->setStyleSheet(s.running&&liveCg.enabled?(cgSignal?"color:#ff737d;font-weight:bold;":"color:#ffca65;font-weight:bold;"):"color:#93a5b8;font-weight:bold;");
     mute_->setEnabled(sourceMode_->currentIndex()<2);
     const bool canConfigure=!busy&&sourceMode_->currentIndex()<2;
     mediaEnabled_->setEnabled(canConfigure);mediaBrowse_->setEnabled(canConfigure);
@@ -281,7 +295,8 @@ void Window::update() {
         nextDiagnostics_=now+std::chrono::seconds(1);QJsonArray ports;
         for(int i=0;i<6;++i){const auto& io=s.io[i];ports.append(QJsonObject{{"slot",i},{"endpoint",ports_[i]->currentData().toString()},{"frames",double(io.frames)},{"dropped",double(io.dropped)},{"noSignal",double(io.noSignal)},{"audioFrames",double(io.audioFrames)},{"audioPeakDb",io.audioPeak},{"bufferedAudioFrames",int(io.bufferedAudioFrames)},{"timingRecoveries",double(io.timingRecoveries)},{"partialAudioWrites",double(io.audioPartialWrites)}});}
         QJsonObject report{{"time",QDateTime::currentDateTimeUtc().toString(Qt::ISODateWithMs)},{"running",s.running},{"receiveOnly",s.receiveOnly},{"muted",s.muted},{"pgmInput",s.state.program.background+1},{"pvwInput",s.state.preview.background+1},{"overruns",double(s.overruns)},{"audioUnderruns",double(s.audioUnderruns)},{"audioOverflowFrames",double(s.audioOverflowFrames)},{"renderMs",s.renderMs},{"ticks",double(s.ticks)},{"ports",ports},{"error",QString::fromStdString(s.error)}};
-        report.insert("version","0.5");report.insert("gpuPath",QString::fromStdString(s.adapter));
+        report.insert("version","0.6");report.insert("gpuPath",QString::fromStdString(s.adapter));
+        report.insert("pgmCgEnabled",s.state.program.keyFill.enabled);report.insert("pvwCgEnabled",s.state.preview.keyFill.enabled);
         report.insert("monitorFps",s.monitorFps);report.insert("monitorFrames",double(s.monitorFrames));
         report.insert("sourceMs",s.sourceMs);report.insert("gpuAndTransferMs",s.gpuMs);
         report.insert("player",QJsonObject{{"active",s.media.active},{"playing",s.media.playing},{"position",s.media.position},{"duration",s.media.duration},{"bufferedFrames",double(s.media.buffered)},{"underruns",double(s.media.underruns)},{"decodeMs",s.media.decodeMs},{"hardwareDecode",s.media.hardware},{"videoDecodeMs",s.media.videoMs},{"convertMs",s.media.convertMs},{"audioDecodeMs",s.media.audioMs},{"error",QString::fromStdString(s.media.error)}});

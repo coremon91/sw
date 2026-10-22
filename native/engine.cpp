@@ -31,6 +31,7 @@ Snapshot Engine::snapshot() const { std::lock_guard lock(mutex_);auto s=snapshot
 void Engine::selectPreview(int i) { std::lock_guard lock(mutex_);switcher_.preview(i); }
 void Engine::setDve(Dve d) { std::lock_guard lock(mutex_);switcher_.setDve(d); }
 void Engine::setKeyFill(KeyFill k) { std::lock_guard lock(mutex_);switcher_.setKeyFill(k); }
+void Engine::setProgramCg(bool enabled) { std::lock_guard lock(mutex_);switcher_.setProgramCg(enabled); }
 void Engine::cut() { std::lock_guard lock(mutex_);switcher_.cut(); }
 void Engine::autoMix(unsigned n) { std::lock_guard lock(mutex_);switcher_.autoMix(n,format_); }
 void Engine::setMuted(bool b) { std::lock_guard lock(mutex_);muted_=b; }

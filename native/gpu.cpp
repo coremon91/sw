@@ -66,8 +66,7 @@ float3 sceneBase(Scene s,float2 uv) {
     float3 over=(min(edge.x,edge.y)<s.fx.z) ? float3(.92,.95,.96) : sampleSource(s.ids.y,lerp(s.crop.xy,1-s.crop.zw,local));
     return lerp(base,over,s.fx.y);
 }
-float3 scene(Scene s,float2 uv) {
-    float3 base=sceneBase(s,uv);
+float3 applyKey(Scene s,float2 uv,float3 base) {
     // Fail transparent if either SDI stream is missing, including inverted keys.
     if(s.keyIds.z==0 || sourceInfo[s.keyIds.x].w<.5 || sourceInfo[s.keyIds.y].w<.5) return base;
     float key=saturate(dot(sampleSource(s.keyIds.y,uv),float3(.2126,.7152,.0722)));
@@ -77,9 +76,10 @@ float3 scene(Scene s,float2 uv) {
     return saturate(lerp(base,keyed,s.keyFx.x));
 }
 float4 compose(V i):SV_TARGET {
-    float3 color=scene(a,i.uv);
-    [branch] if(options.x>0) color=lerp(color,scene(b,i.uv),options.x);
-    return float4(color,1);
+    float3 color=sceneBase(a,i.uv);
+    [branch] if(options.x>0) color=lerp(color,sceneBase(b,i.uv),options.x);
+    // One downstream CG layer over the background/DVE transition.
+    return float4(applyKey(a,i.uv,color),1);
 }
 float3 yuv(float3 c) {
     return float3(16+219*dot(c,float3(.2126,.7152,.0722)),128+224*dot(c,float3(-.114572,-.385428,.5)),128+224*dot(c,float3(.5,-.454153,-.045847)))/255;
