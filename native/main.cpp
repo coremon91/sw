@@ -4,12 +4,12 @@
 #include <QSettings>
 #include <QFontDatabase>
 int main(int argc,char** argv) {
-    QApplication app(argc,argv);QCoreApplication::setOrganizationName("SW");QCoreApplication::setApplicationName("Switcher-0.6");QCoreApplication::setApplicationVersion("0.6.0");
+    QApplication app(argc,argv);QCoreApplication::setOrganizationName("SW");QCoreApplication::setApplicationName("Switcher-0.7");QCoreApplication::setApplicationVersion("0.7.0");
     {QSettings settings;
-     if(!settings.value("v06Initialized",false).toBool()) {
-         QSettings previous("SW","Switcher-0.5");
+     if(!settings.value("v07Initialized",false).toBool()) {
+         QSettings previous("SW","Switcher-0.6");
          for(const auto& key:previous.allKeys())settings.setValue(key,previous.value(key));
-         settings.setValue("v06Initialized",true);
+         settings.setValue("v07Initialized",true);
      }}
     const auto fonts=QString::fromLocal8Bit(qgetenv("WINDIR"))+"/Fonts/";
     for(const auto* name:{"segoeui.ttf","segoeuib.ttf","malgun.ttf"}) QFontDatabase::addApplicationFont(fonts+name);

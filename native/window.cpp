@@ -23,6 +23,9 @@
 #include <QFileInfo>
 #include <QStackedWidget>
 #include <QCloseEvent>
+#include <QTextBrowser>
+#include <QFile>
+#include <QTextCursor>
 namespace sw {
 Monitor::Monitor(QString title,QWidget* parent):QWidget(parent),title_(std::move(title)) { setMinimumSize(180,125);setSizePolicy(QSizePolicy::Expanding,QSizePolicy::Expanding); }
 void Monitor::updateImage(const Image& i,QString status,QColor accent,bool newImage) {
@@ -41,7 +44,7 @@ void Monitor::paintEvent(QPaintEvent*) {
     p.setFont(QFont("Segoe UI",9,QFont::DemiBold));p.drawText(12,21,title_);p.drawText(QRect(65,3,width()-76,26),Qt::AlignRight|Qt::AlignVCenter,status_);
 }
 Window::Window(int receiver) {
-    setWindowTitle("SW 0.6 CUDA / CG / Free Routing — Software Video Switcher");resize(1480,940);
+    setWindowTitle("SW 0.7 CUDA / CG / Free Routing — Software Video Switcher");resize(1480,940);
     setStyleSheet(R"(QMainWindow,QWidget{background:#111820;color:#dce3ec;font-family:'Segoe UI';font-size:12px;}QGroupBox{border:1px solid #303e4e;border-radius:6px;margin-top:18px;padding:10px;}QGroupBox::title{subcontrol-origin:margin;left:10px;color:#8fa3b9;}QPushButton{background:#263444;border:1px solid #3d5064;padding:9px 14px;border-radius:4px;font-weight:600;}QPushButton:hover{background:#354960;}QPushButton:disabled{color:#627084;background:#1a242f;}QComboBox,QSpinBox,QDoubleSpinBox{background:#1b2835;border:1px solid #3d5064;border-radius:3px;padding:5px;}QLabel#headline{font-size:23px;font-weight:700;}QCheckBox{spacing:8px;}QScrollArea{border:0;})");
     tabs_=new QTabWidget;setCentralWidget(tabs_);
     auto* scroll=new QScrollArea;scroll->setWidgetResizable(true);tabs_->addTab(scroll,"스위처");
@@ -52,7 +55,7 @@ Window::Window(int receiver) {
     connect(playerMode_,qOverload<int>(&QComboBox::currentIndexChanged),playerStack,&QStackedWidget::setCurrentIndex);
     auto* root=new QWidget;scroll->setWidget(root);auto* layout=new QVBoxLayout(root);layout->setContentsMargins(20,14,20,14);layout->setSpacing(12);
     auto* header=new QHBoxLayout;auto* title=new QLabel("SW   /   VIDEO SWITCHER");title->setObjectName("headline");header->addWidget(title);header->addStretch();
-    auto* version=new QLabel("C++ · GPU 합성  |  개발 버전 0.6 · D3D11 합성 / CUDA 전송 · 입출력 선택");version->setStyleSheet("color:#8fa3b9;");header->addWidget(version);layout->addLayout(header);
+    auto* version=new QLabel("C++ · GPU 합성  |  개발 버전 0.7 · D3D11 합성 / CUDA 전송 · 입출력 선택");version->setStyleSheet("color:#8fa3b9;");header->addWidget(version);layout->addLayout(header);
     auto* monitorRateRow=new QHBoxLayout;
     monitorRateRow->addWidget(new QLabel("미리보기 갱신"));
     auto* monitorRate=new QComboBox;
@@ -65,6 +68,31 @@ Window::Window(int receiver) {
     });
     monitorRate->setToolTip("GUI 미리보기의 목표 갱신 속도입니다. SDI 출력 포맷과 프레임 속도는 변경하지 않습니다.");
     monitorRateRow->addWidget(monitorRate);monitorRateRow->addStretch();layout->addLayout(monitorRateRow);
+    auto* settingsPage=new QWidget;auto* settingsLayout=new QVBoxLayout(settingsPage);
+    settingsLayout->setContentsMargins(20,14,20,14);tabs_->addTab(settingsPage,"설정 / GUIDE");
+    auto* settingsTitle=new QLabel("설정 및 운용 GUIDE");settingsTitle->setObjectName("headline");settingsLayout->addWidget(settingsTitle);
+    auto* settingsRow=new QHBoxLayout;settingsRow->addWidget(new QLabel("미리보기 갱신"));
+    auto* settingsRate=new QComboBox;settingsRate->addItems({"59.94 fps","29.97 fps","14.985 fps"});settingsRate->setCurrentIndex(monitorRate->currentIndex());
+    connect(settingsRate,qOverload<int>(&QComboBox::currentIndexChanged),monitorRate,&QComboBox::setCurrentIndex);
+    connect(monitorRate,qOverload<int>(&QComboBox::currentIndexChanged),settingsRate,&QComboBox::setCurrentIndex);
+    settingsRow->addWidget(settingsRate);settingsRow->addWidget(new QLabel("실행 중 적용 · 자동 저장 · 실제 속도는 스위처 하단에서 확인"));settingsRow->addStretch();settingsLayout->addLayout(settingsRow);
+    auto* searchRow=new QHBoxLayout;auto* guideSearch=new QLineEdit;guideSearch->setPlaceholderText("가이드 검색: 입력 부족, 버퍼 초과, CG, CUT…");
+    auto* findNext=new QPushButton("다음 찾기");auto* guideTop=new QPushButton("맨 위로");
+    searchRow->addWidget(guideSearch,1);searchRow->addWidget(findNext);searchRow->addWidget(guideTop);settingsLayout->addLayout(searchRow);
+    auto* guide=new QTextBrowser;guide->setObjectName("settingsGuide");guide->setOpenExternalLinks(false);
+    guide->setStyleSheet("QTextBrowser{background:#18232e;border:1px solid #3d5064;padding:16px;font-size:14px;}");
+    QFile guideFile(":/guide/docs/17-settings-guide.ko.md");
+    if(guideFile.open(QIODevice::ReadOnly))guide->setMarkdown(QString::fromUtf8(guideFile.readAll()));
+    else guide->setPlainText("가이드 리소스를 불러올 수 없습니다.");
+    settingsLayout->addWidget(guide,1);
+    auto* searchStatus=new QLabel;settingsLayout->addWidget(searchStatus);
+    auto searchGuide=[guide,guideSearch,searchStatus]{
+        const auto query=guideSearch->text().trimmed();if(query.isEmpty()){searchStatus->clear();return;}
+        bool found=guide->find(query);if(!found){guide->moveCursor(QTextCursor::Start);found=guide->find(query);}
+        searchStatus->setText(found?"검색 결과를 선택했습니다. 다음 찾기로 계속 검색합니다.":"검색 결과가 없습니다.");
+    };
+    connect(findNext,&QPushButton::clicked,this,searchGuide);connect(guideSearch,&QLineEdit::returnPressed,this,searchGuide);
+    connect(guideTop,&QPushButton::clicked,this,[guide]{guide->moveCursor(QTextCursor::Start);});
     auto* top=new QHBoxLayout;
     monitors_[5]=new Monitor("PREVIEW");monitors_[4]=new Monitor("PROGRAM");
     monitors_[5]->setMinimumHeight(235);monitors_[4]->setMinimumHeight(235);top->addWidget(monitors_[5]);top->addWidget(monitors_[4]);layout->addLayout(top,2);
@@ -295,7 +323,7 @@ void Window::update() {
         nextDiagnostics_=now+std::chrono::seconds(1);QJsonArray ports;
         for(int i=0;i<6;++i){const auto& io=s.io[i];ports.append(QJsonObject{{"slot",i},{"endpoint",ports_[i]->currentData().toString()},{"frames",double(io.frames)},{"dropped",double(io.dropped)},{"noSignal",double(io.noSignal)},{"audioFrames",double(io.audioFrames)},{"audioPeakDb",io.audioPeak},{"bufferedAudioFrames",int(io.bufferedAudioFrames)},{"timingRecoveries",double(io.timingRecoveries)},{"partialAudioWrites",double(io.audioPartialWrites)}});}
         QJsonObject report{{"time",QDateTime::currentDateTimeUtc().toString(Qt::ISODateWithMs)},{"running",s.running},{"receiveOnly",s.receiveOnly},{"muted",s.muted},{"pgmInput",s.state.program.background+1},{"pvwInput",s.state.preview.background+1},{"overruns",double(s.overruns)},{"audioUnderruns",double(s.audioUnderruns)},{"audioOverflowFrames",double(s.audioOverflowFrames)},{"renderMs",s.renderMs},{"ticks",double(s.ticks)},{"ports",ports},{"error",QString::fromStdString(s.error)}};
-        report.insert("version","0.6");report.insert("gpuPath",QString::fromStdString(s.adapter));
+        report.insert("version","0.7");report.insert("gpuPath",QString::fromStdString(s.adapter));
         report.insert("pgmCgEnabled",s.state.program.keyFill.enabled);report.insert("pvwCgEnabled",s.state.preview.keyFill.enabled);
         report.insert("monitorFps",s.monitorFps);report.insert("monitorFrames",double(s.monitorFrames));
         report.insert("sourceMs",s.sourceMs);report.insert("gpuAndTransferMs",s.gpuMs);
@@ -307,6 +335,8 @@ void Window::update() {
 bool Window::savePreview(const QString& path) { update();return grab().save(path); }
 bool Window::verifyStableLayout() {
     timer_.stop();const auto original=status_->text();
+    auto* guide=findChild<QTextBrowser*>("settingsGuide");
+    const bool guideReady=guide&&guide->toPlainText().contains("입력 부족")&&guide->toPlainText().contains("독립 CG")&&tabs_->count()==3;
     auto settle=[&]{for(int k=0;k<4;++k)QApplication::processEvents();};
     auto geometry=[&]{std::array<QRect,6> r;for(int i=0;i<6;++i)r[i]=QRect(monitors_[i]->mapTo(this,QPoint()),monitors_[i]->size());return r;};
     bool stable=true,legacyExpanded=false;const int footerHeight=status_->height();
@@ -322,6 +352,7 @@ bool Window::verifyStableLayout() {
         status_->setFixedHeight(footerHeight);status_->setSizePolicy(QSizePolicy::Ignored,QSizePolicy::Fixed);
     }
     status_->setText(original);std::cout<<"{\"fixed_footer_stable\":"<<(stable?"true":"false")<<",\"variable_footer_wrap_verified\":"<<(legacyExpanded?"true":"false")<<"}\n";
-    return stable&&legacyExpanded;
+    std::cout<<"{\"embedded_guide_loaded\":"<<(guideReady?"true":"false")<<"}\n";
+    return stable&&legacyExpanded&&guideReady;
 }
 }

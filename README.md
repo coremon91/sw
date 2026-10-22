@@ -1,6 +1,10 @@
 # SW — Software Video Switcher
 
-Vizrt TriCaster의 제작 흐름을 참고하는 **Windows C++20 / Qt 6 / Direct3D 11 + CUDA** 소프트웨어 비디오 스위처입니다. 현재는 실제 영상 합성 엔진과 제조사 카드 I/O 어댑터를 포함하는 **0.6 개발 버전**입니다.
+Vizrt TriCaster의 제작 흐름을 참고하는 **Windows C++20 / Qt 6 / Direct3D 11 + CUDA** 소프트웨어 비디오 스위처입니다. 현재는 실제 영상 합성 엔진과 제조사 카드 I/O 어댑터를 포함하는 **0.7 개발 버전**입니다.
+
+## 설정 / GUIDE 탭 (0.7)
+
+검색 가능한 내장 운용 가이드와 동기화된 미리보기 속도 설정을 추가했습니다. 입출력 연결, CG, 오디오 카운터와 지연 해석을 앱에서 확인할 수 있습니다. [가이드 원문](docs/17-settings-guide.ko.md).
 
 ## 독립 CG ON/OFF (0.6)
 
