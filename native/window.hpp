@@ -11,6 +11,8 @@
 #include <QLineEdit>
 #include <QSlider>
 #include <QTabWidget>
+#include <QJsonObject>
+#include <QFile>
 #include "portable_player.hpp"
 namespace sw {
 class Monitor:public QWidget {
@@ -82,5 +84,18 @@ private:
     QLabel* keyFillStatus_;
     QPushButton *cgOn_,*cgOff_;
     QLabel* cgOnAir_;
+    QComboBox* monitorRate_;
+    QPushButton* loadSettings_;
+    QLabel *settingsStatus_,*previewFps_;
+    QJsonObject captureSettings() const;
+    bool applySettings(const QJsonObject&);
+    void saveSettings();
+    void loadSettings();
+    QCheckBox* logEnabled_;
+    QLabel* logStatus_;
+    QFile sessionLog_;
+    QString logDirectory_,lastLogPath_;
+    bool logFailed_=false;
+    void recordLog(QJsonObject report);
 };
 }

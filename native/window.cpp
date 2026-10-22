@@ -26,6 +26,12 @@
 #include <QTextBrowser>
 #include <QFile>
 #include <QTextCursor>
+#include <QTemporaryDir>
+#include <QStandardPaths>
+#include <QDir>
+#include <QDesktopServices>
+#include <QUrl>
+#include <QUuid>
 namespace sw {
 Monitor::Monitor(QString title,QWidget* parent):QWidget(parent),title_(std::move(title)) { setMinimumSize(180,125);setSizePolicy(QSizePolicy::Expanding,QSizePolicy::Expanding); }
 void Monitor::updateImage(const Image& i,QString status,QColor accent,bool newImage) {
@@ -44,7 +50,7 @@ void Monitor::paintEvent(QPaintEvent*) {
     p.setFont(QFont("Segoe UI",9,QFont::DemiBold));p.drawText(12,21,title_);p.drawText(QRect(65,3,width()-76,26),Qt::AlignRight|Qt::AlignVCenter,status_);
 }
 Window::Window(int receiver) {
-    setWindowTitle("SW 0.7.1 CUDA / CG / Free Routing — Software Video Switcher");resize(1480,940);
+    setWindowTitle("SW 0.7.2 CUDA / CG / Free Routing — Software Video Switcher");resize(1480,940);
     setStyleSheet(R"(QMainWindow,QWidget{background:#111820;color:#dce3ec;font-family:'Segoe UI';font-size:12px;}QGroupBox{border:1px solid #303e4e;border-radius:6px;margin-top:18px;padding:10px;}QGroupBox::title{subcontrol-origin:margin;left:10px;color:#8fa3b9;}QPushButton{background:#263444;border:1px solid #3d5064;padding:9px 14px;border-radius:4px;font-weight:600;}QPushButton:hover{background:#354960;}QPushButton:disabled{color:#627084;background:#1a242f;}QComboBox,QSpinBox,QDoubleSpinBox{background:#1b2835;border:1px solid #3d5064;border-radius:3px;padding:5px;}QLabel#headline{font-size:23px;font-weight:700;}QCheckBox{spacing:8px;}QScrollArea{border:0;})");
     tabs_=new QTabWidget;setCentralWidget(tabs_);
     auto* scroll=new QScrollArea;scroll->setWidgetResizable(true);tabs_->addTab(scroll,"스위처");
@@ -55,19 +61,19 @@ Window::Window(int receiver) {
     connect(playerMode_,qOverload<int>(&QComboBox::currentIndexChanged),playerStack,&QStackedWidget::setCurrentIndex);
     auto* root=new QWidget;scroll->setWidget(root);auto* layout=new QVBoxLayout(root);layout->setContentsMargins(20,14,20,14);layout->setSpacing(12);
     auto* header=new QHBoxLayout;auto* title=new QLabel("SW   /   VIDEO SWITCHER");title->setObjectName("headline");header->addWidget(title);header->addStretch();
-    auto* version=new QLabel("C++ · GPU 합성  |  개발 버전 0.7.1 · D3D11 합성 / CUDA 전송 · 입출력 선택");version->setStyleSheet("color:#8fa3b9;");header->addWidget(version);layout->addLayout(header);
+    auto* version=new QLabel("C++ · GPU 합성  |  개발 버전 0.7.2 · D3D11 합성 / CUDA 전송 · 입출력 선택");version->setStyleSheet("color:#8fa3b9;");header->addWidget(version);layout->addLayout(header);
     auto* monitorRateRow=new QHBoxLayout;
     monitorRateRow->addWidget(new QLabel("미리보기 갱신"));
-    auto* monitorRate=new QComboBox;
+    auto* monitorRate=new QComboBox;monitorRate_=monitorRate;
     monitorRate->addItem("59.94 fps",1);monitorRate->addItem("29.97 fps",2);monitorRate->addItem("14.985 fps",4);
     const int savedInterval=QSettings().value("monitorInterval",1).toInt();
     monitorRate->setCurrentIndex(std::max(0,monitorRate->findData(savedInterval)));
     engine_.setMonitorInterval(monitorRate->currentData().toUInt());
     connect(monitorRate,qOverload<int>(&QComboBox::currentIndexChanged),this,[this,monitorRate]{
-        const auto interval=monitorRate->currentData().toUInt();engine_.setMonitorInterval(interval);QSettings().setValue("monitorInterval",interval);
+        const auto interval=monitorRate->currentData().toUInt();engine_.setMonitorInterval(interval);
     });
     monitorRate->setToolTip("GUI 미리보기의 목표 갱신 속도입니다. SDI 출력 포맷과 프레임 속도는 변경하지 않습니다.");
-    monitorRateRow->addWidget(monitorRate);monitorRateRow->addStretch();layout->addLayout(monitorRateRow);
+    monitorRateRow->addWidget(monitorRate);previewFps_=new QLabel;monitorRateRow->addWidget(previewFps_);monitorRateRow->addStretch();
     auto* settingsPage=new QWidget;auto* settingsRoot=new QVBoxLayout(settingsPage);tabs_->addTab(settingsPage,"설정");
     auto* settingsSections=new QTabWidget;settingsRoot->addWidget(settingsSections);
     auto* routingScroll=new QScrollArea;routingScroll->setWidgetResizable(true);
@@ -76,11 +82,17 @@ Window::Window(int receiver) {
     auto* guidePage=new QWidget;auto* settingsLayout=new QVBoxLayout(guidePage);settingsSections->addTab(guidePage,"사용 가이드");
     settingsLayout->setContentsMargins(20,14,20,14);
     auto* settingsTitle=new QLabel("설정 및 운용 GUIDE");settingsTitle->setObjectName("headline");settingsLayout->addWidget(settingsTitle);
-    auto* settingsRow=new QHBoxLayout;settingsRow->addWidget(new QLabel("미리보기 갱신"));
-    auto* settingsRate=new QComboBox;settingsRate->addItems({"59.94 fps","29.97 fps","14.985 fps"});settingsRate->setCurrentIndex(monitorRate->currentIndex());
-    connect(settingsRate,qOverload<int>(&QComboBox::currentIndexChanged),monitorRate,&QComboBox::setCurrentIndex);
-    connect(monitorRate,qOverload<int>(&QComboBox::currentIndexChanged),settingsRate,&QComboBox::setCurrentIndex);
-    settingsRow->addWidget(settingsRate);settingsRow->addWidget(new QLabel("실행 중 적용 · 자동 저장 · 실제 속도는 스위처 하단에서 확인"));settingsRow->addStretch();routingLayout->addLayout(settingsRow);
+    routingLayout->addLayout(monitorRateRow);
+    auto* presetRow=new QHBoxLayout;auto* saveSettingsButton=new QPushButton("설정 저장");loadSettings_=new QPushButton("저장 설정 불러오기");
+    presetRow->addWidget(saveSettingsButton);presetRow->addWidget(loadSettings_);presetRow->addStretch();routingLayout->addLayout(presetRow);
+    settingsStatus_=new QLabel("설정 저장: 현재 입출력·미리보기·플레이어 설정을 저장하고 다음 실행에 복원합니다.");settingsStatus_->setWordWrap(true);routingLayout->addWidget(settingsStatus_);
+    connect(saveSettingsButton,&QPushButton::clicked,this,[this]{saveSettings();});connect(loadSettings_,&QPushButton::clicked,this,[this]{loadSettings();});
+    logDirectory_=QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation)+"/logs";
+    auto* logRow=new QHBoxLayout;logEnabled_=new QCheckBox("재생 / 세션 로그 기록 (1초 간격)");logEnabled_->setChecked(true);
+    auto* openLogs=new QPushButton("로그 폴더 열기");logRow->addWidget(logEnabled_);logRow->addWidget(openLogs);logRow->addStretch();routingLayout->addLayout(logRow);
+    logStatus_=new QLabel("로그 저장 위치: "+QDir::toNativeSeparators(logDirectory_));logStatus_->setWordWrap(true);logStatus_->setTextInteractionFlags(Qt::TextSelectableByMouse);routingLayout->addWidget(logStatus_);
+    connect(openLogs,&QPushButton::clicked,this,[this]{if(QDir().mkpath(logDirectory_))QDesktopServices::openUrl(QUrl::fromLocalFile(logDirectory_));});
+    connect(logEnabled_,&QCheckBox::toggled,this,[this]{logFailed_=false;nextDiagnostics_={};});
     auto* searchRow=new QHBoxLayout;auto* guideSearch=new QLineEdit;guideSearch->setPlaceholderText("가이드 검색: 입력 부족, 버퍼 초과, CG, CUT…");
     auto* findNext=new QPushButton("다음 찾기");auto* guideTop=new QPushButton("맨 위로");
     searchRow->addWidget(guideSearch,1);searchRow->addWidget(findNext);searchRow->addWidget(guideTop);settingsLayout->addLayout(searchRow);
@@ -174,6 +186,7 @@ Window::Window(int receiver) {
     connect(refresh_,&QPushButton::clicked,this,[this]{refreshDevices();});connect(start_,&QPushButton::clicked,this,[this]{startSession();});connect(stop_,&QPushButton::clicked,this,[this]{engine_.stop();update();});
     connect(sourceMode_,qOverload<int>(&QComboBox::currentIndexChanged),this,[this]{refreshDevices();});
     QSettings settings;mediaFile_->setText(settings.value("mediaFile").toString());mediaLoop_->setChecked(settings.value("mediaLoop",false).toBool());mode_->setCurrentIndex(receiver?1:settings.value("mode",0).toInt());refreshDevices();
+    if(!receiver&&settings.contains("routingPreset"))loadSettings();
     connect(qApp,&QApplication::focusChanged,this,[this](QWidget*,QWidget* focused) {
         bool editing=false;
         for(auto* p=focused;p;p=p->parentWidget()) if(qobject_cast<QLineEdit*>(p)||qobject_cast<QAbstractSpinBox*>(p)||qobject_cast<QComboBox*>(p)) {editing=true;break;}
@@ -183,8 +196,48 @@ Window::Window(int receiver) {
     connect(&timer_,&QTimer::timeout,this,[this]{update();});timer_.setTimerType(Qt::PreciseTimer);timer_.start(16);update();
 }
 Window::~Window() { engine_.stop(); }
+QJsonObject Window::captureSettings() const {
+    QJsonArray ports;for(auto* port:ports_)ports.append(port->currentData().toString());
+    return {{"schema",1},{"sourceMode",sourceMode_->currentIndex()},{"mode",mode_->currentIndex()},
+        {"ports",ports},{"monitorInterval",monitorRate_->currentData().toInt()},{"duration",duration_->value()},
+        {"muted",mute_->isChecked()},{"mediaEnabled",mediaEnabled_->isChecked()},{"mediaFile",mediaFile_->text()},{"mediaLoop",mediaLoop_->isChecked()},{"logging",logEnabled_->isChecked()}};
+}
+bool Window::applySettings(const QJsonObject& value) {
+    const auto state=engine_.snapshot();if(state.running||state.starting)return false;
+    auto integer=[&](const char* name,int low,int high){const auto v=value.value(name);return v.isDouble()&&v.toDouble()==v.toInt(-999)&&v.toInt()>=low&&v.toInt()<=high;};
+    const auto ports=value.value("ports").toArray();const int interval=value.value("monitorInterval").toInt();
+    if(!integer("schema",1,1)||!integer("sourceMode",0,3)||!integer("mode",0,1)||!integer("duration",1,600)
+        ||!integer("monitorInterval",1,4)||(interval!=1&&interval!=2&&interval!=4)||ports.size()!=6
+        ||!value.value("muted").isBool()||!value.value("mediaEnabled").isBool()||!value.value("mediaLoop").isBool()||!value.value("mediaFile").isString()
+        ||(value.contains("logging")&&!value.value("logging").isBool()))return false;
+    for(const auto& port:ports)if(!port.isString())return false;
+    {QSignalBlocker sourceBlock(sourceMode_),mediaBlock(mediaEnabled_);
+     sourceMode_->setCurrentIndex(value.value("sourceMode").toInt());mode_->setCurrentIndex(value.value("mode").toInt());
+     mediaEnabled_->setChecked(value.value("mediaEnabled").toBool());mediaFile_->setText(value.value("mediaFile").toString());}
+    mediaLoop_->setChecked(value.value("mediaLoop").toBool());duration_->setValue(value.value("duration").toInt());mute_->setChecked(value.value("muted").toBool());
+    monitorRate_->setCurrentIndex(monitorRate_->findData(interval));refreshDevices();
+    logEnabled_->setChecked(value.value("logging").toBool(true));
+    QStringList missing;
+    for(int i=0;i<6;++i){const auto id=ports[i].toString();int index=ports_[i]->findData(id);
+        if(index<0){ports_[i]->addItem("장치 없음 · "+id,id);index=ports_[i]->count()-1;}
+        if(!id.isEmpty()&&std::none_of(devices_.begin(),devices_.end(),[&](const Endpoint& e){return QString::fromStdString(e.id)==id;}))missing<<id;
+        ports_[i]->setCurrentIndex(index);
+    }
+    settingsStatus_->setText(missing.isEmpty()?"저장 설정을 불러왔습니다. 확인 후 세션 시작을 누르세요.":"저장 설정 복원 · 연결되지 않은 장치: "+missing.join(", ")+" · 연결 후 장치 다시 검색을 누르세요.");
+    return true;
+}
+void Window::saveSettings() {
+    QSettings settings;settings.setValue("routingPreset",QJsonDocument(captureSettings()).toJson(QJsonDocument::Compact));settings.sync();
+    settingsStatus_->setText(settings.status()==QSettings::NoError?"설정 저장 완료 · 다음 실행에 복원됩니다. CG/DVE와 ON AIR 상태는 저장하지 않습니다.":"설정 저장 실패 · 저장소 접근 권한을 확인하세요.");
+}
+void Window::loadSettings() {
+    const auto state=engine_.snapshot();if(state.running||state.starting){settingsStatus_->setText("세션을 정지한 후 설정을 불러올 수 있습니다.");return;}
+    QSettings settings;if(!settings.contains("routingPreset")){settingsStatus_->setText("저장된 설정이 없습니다. 먼저 설정 저장을 누르세요.");return;}
+    QJsonParseError error;const auto doc=QJsonDocument::fromJson(settings.value("routingPreset").toByteArray(),&error);
+    if(error.error!=QJsonParseError::NoError||!doc.isObject()||!applySettings(doc.object()))settingsStatus_->setText("저장 설정 형식이 올바르지 않습니다. 현재 설정은 유지됩니다.");
+}
 void Window::closeEvent(QCloseEvent* event) {
-    engine_.stop();portablePlayer_->shutdown();QMainWindow::closeEvent(event);
+    engine_.stop();nextControls_={};nextDiagnostics_={};update();portablePlayer_->shutdown();QMainWindow::closeEvent(event);
     // A foreign QWindow can keep Qt's last-window tracking alive after the
     // main widget closes. Explicitly finish the single-main-window application.
     if(event->isAccepted())QCoreApplication::quit();
@@ -195,7 +248,8 @@ void Window::refreshDevices() {
     for(int i=0;i<6;++i) {
         const auto old=previousRoutingMode_==sourceMode_->currentIndex()?ports_[i]->currentData().toString():QString();ports_[i]->clear();ports_[i]->addItem(i<4?"사용 안 함":"LOCAL · SDI 출력 안 함","");
         for(const auto& e:devices_) if(!(receive&&i>=4)&&(i<4?e.input:e.output)) ports_[i]->addItem(QString(receive&&e.detail.find("capture=busy")!=std::string::npos?"사용 중 · ":"")+QString::fromStdString(e.label)+ (e.uhd?" [HD/UHD]":" [HD]"),QString::fromStdString(e.id));
-        QString saved=ports_[i]->findData(old)>0?old:settings.value(QString(receive?(aja?"ajaReceivePort%1":"receivePort%1"):"port%1").arg(i)).toString();
+        QString saved=previousRoutingMode_==sourceMode_->currentIndex()?old:settings.value(QString(receive?(aja?"ajaReceivePort%1":"receivePort%1"):"port%1").arg(i)).toString();
+        if(ports_[i]->findData(saved)<0)ports_[i]->addItem("장치 없음 · "+saved,saved);
         ports_[i]->setCurrentIndex(std::max(0,ports_[i]->findData(saved)));
         ports_[i]->setEnabled((sourceMode_->currentIndex()==1||(receive&&i<4))&&!(i==3&&!receive&&mediaEnabled_->isChecked()));
     }
@@ -257,6 +311,7 @@ void Window::applyKeyFill() {
 void Window::update() {
     auto s=engine_.snapshot();const bool busy=s.running||s.starting;session_->setEnabled(!busy);start_->setEnabled(!busy);stop_->setEnabled(busy);cut_->setEnabled(s.running&&!s.state.transitioning);auto_->setEnabled(cut_->isEnabled());dvePanel_->setEnabled(s.running&&!s.state.transitioning);
     keyFillPanel_->setEnabled(s.running&&!s.state.transitioning);
+    loadSettings_->setEnabled(!busy);
     const auto& liveCg=s.state.program.keyFill;const auto& stagedCg=s.state.preview.keyFill;
     cgOn_->setEnabled(s.running&&stagedCg.fillSource!=stagedCg.keySource&&s.signal[stagedCg.fillSource]&&s.signal[stagedCg.keySource]);
     cgOff_->setEnabled(s.running&&liveCg.enabled);
@@ -320,32 +375,86 @@ void Window::update() {
         status=QString("%1 수신 · %2 · 유효 수신 %3 frames · 화면 처리 %4 fps\n입력 드롭/무신호 %5 · 모니터 생략 %6 · 마감 초과(누적) %7 · SDI 출력 없음")
             .arg(sourceMode_->currentIndex()==3?"KONA 5":"DeckLink").arg(QString::fromStdString(Format::of(mode_->currentIndex()?Mode::Uhd:Mode::Hd).label())).arg(frames).arg(s.monitorFps,0,'f',1).arg(dropped+noSignal).arg(skipped).arg(s.overruns);
     }
-    if(s.running)status+=QString("  |  미리보기 %1 fps").arg(s.monitorFps,0,'f',1);
+    previewFps_->setText(s.running?QString("실제 %1 fps").arg(s.monitorFps,0,'f',1):"정지 · 목표 갱신 속도 선택");
     if(!s.receiveOnly)status+=QString("  |  %1 ms  ·  마감 초과(누적) %2  ·  I/O 드롭 %3  ·  오디오 부족 %4").arg(s.renderMs,0,'f',1).arg(s.overruns).arg(dropped).arg(s.audioUnderruns);
     if(!s.adapter.empty())status+="  |  "+QString::fromStdString(s.adapter);
     if(!s.error.empty())status="세션 오류: "+QString::fromStdString(s.error);
     status_->setText(status);status_->setStyleSheet(s.error.empty()?"color:#93a5b8;":"color:#ff929a;");
     status_->setToolTip(status);
-    if(!diagnosticsPath_.isEmpty()&&now>=nextDiagnostics_) {
+    if((!diagnosticsPath_.isEmpty()||sessionLog_.isOpen()||(logEnabled_->isChecked()&&busy))
+        &&(now>=nextDiagnostics_||(sessionLog_.isOpen()&&(!busy||!logEnabled_->isChecked())))) {
         nextDiagnostics_=now+std::chrono::seconds(1);QJsonArray ports;
         for(int i=0;i<6;++i){const auto& io=s.io[i];ports.append(QJsonObject{{"slot",i},{"endpoint",ports_[i]->currentData().toString()},{"frames",double(io.frames)},{"dropped",double(io.dropped)},{"noSignal",double(io.noSignal)},{"audioFrames",double(io.audioFrames)},{"audioPeakDb",io.audioPeak},{"bufferedAudioFrames",int(io.bufferedAudioFrames)},{"timingRecoveries",double(io.timingRecoveries)},{"partialAudioWrites",double(io.audioPartialWrites)}});}
         QJsonObject report{{"time",QDateTime::currentDateTimeUtc().toString(Qt::ISODateWithMs)},{"running",s.running},{"receiveOnly",s.receiveOnly},{"muted",s.muted},{"pgmInput",s.state.program.background+1},{"pvwInput",s.state.preview.background+1},{"overruns",double(s.overruns)},{"audioUnderruns",double(s.audioUnderruns)},{"audioOverflowFrames",double(s.audioOverflowFrames)},{"renderMs",s.renderMs},{"ticks",double(s.ticks)},{"ports",ports},{"error",QString::fromStdString(s.error)}};
-        report.insert("version","0.7.1");report.insert("gpuPath",QString::fromStdString(s.adapter));
+        report.insert("version","0.7.2");report.insert("gpuPath",QString::fromStdString(s.adapter));
+        report.insert("starting",s.starting);report.insert("mode",mode_->currentIndex()==1?"2160p59.94":"1080i29.97");
+        report.insert("sourceMode",sourceMode_->currentIndex());report.insert("monitorInterval",monitorRate_->currentData().toInt());
+        QJsonArray inputStatus;for(int i=0;i<4;++i)inputStatus.append(QJsonObject{{"input",i+1},{"signal",s.signal[i]},{"fps",s.inputFps[i]},{"audioBufferedFrames",int(s.audioBuffered[i])}});report.insert("inputs",inputStatus);
         report.insert("pgmCgEnabled",s.state.program.keyFill.enabled);report.insert("pvwCgEnabled",s.state.preview.keyFill.enabled);
         report.insert("monitorFps",s.monitorFps);report.insert("monitorFrames",double(s.monitorFrames));
         report.insert("sourceMs",s.sourceMs);report.insert("gpuAndTransferMs",s.gpuMs);
         report.insert("player",QJsonObject{{"active",s.media.active},{"playing",s.media.playing},{"position",s.media.position},{"duration",s.media.duration},{"bufferedFrames",double(s.media.buffered)},{"underruns",double(s.media.underruns)},{"decodeMs",s.media.decodeMs},{"hardwareDecode",s.media.hardware},{"videoDecodeMs",s.media.videoMs},{"convertMs",s.media.convertMs},{"audioDecodeMs",s.media.audioMs},{"error",QString::fromStdString(s.media.error)}});
         if(s.media.active){auto port=ports[3].toObject();port.insert("endpoint","media:4");ports[3]=port;report.insert("ports",ports);}
-        QSaveFile file(diagnosticsPath_);if(file.open(QIODevice::WriteOnly)){file.write(QJsonDocument(report).toJson());file.commit();}
+        if(!diagnosticsPath_.isEmpty()){QSaveFile file(diagnosticsPath_);if(file.open(QIODevice::WriteOnly)){file.write(QJsonDocument(report).toJson());file.commit();}}
+        recordLog(report);
     }
 }
 bool Window::savePreview(const QString& path) { update();return grab().save(path); }
+void Window::recordLog(QJsonObject report) {
+    const bool active=report.value("running").toBool()||report.value("starting").toBool();
+    if(logFailed_){if(!active)logFailed_=false;return;}
+    const bool enabled=logEnabled_->isChecked();
+    bool rollover=active&&enabled&&sessionLog_.isOpen()&&sessionLog_.size()>=20*1024*1024;
+    if(rollover)sessionLog_.close();
+    bool opened=false;
+    if(!sessionLog_.isOpen()&&enabled&&active) {
+        lastLogPath_=logDirectory_+"/sw-"+QDateTime::currentDateTimeUtc().toString("yyyyMMdd-HHmmss-zzz")+"-"+QUuid::createUuid().toString(QUuid::Id128)+".jsonl";
+        sessionLog_.setFileName(lastLogPath_);
+        if(!QDir().mkpath(logDirectory_)||!sessionLog_.open(QIODevice::WriteOnly|QIODevice::NewOnly)) {
+            logFailed_=true;logStatus_->setText("로그 기록 실패: "+sessionLog_.errorString()+" · "+QDir::toNativeSeparators(logDirectory_));return;
+        }
+        opened=true;
+    }
+    if(!sessionLog_.isOpen())return;
+    if(!report.contains("time"))report.insert("time",QDateTime::currentDateTimeUtc().toString(Qt::ISODateWithMs));
+    report.insert("event",!enabled?"logging_disabled":!active?"session_end":opened?(rollover?"segment_start":"session_start"):"sample");
+    const auto line=QJsonDocument(report).toJson(QJsonDocument::Compact)+'\n';
+    if(sessionLog_.write(line)!=line.size()||!sessionLog_.flush()) {
+        logFailed_=true;logStatus_->setText("로그 쓰기 실패: "+sessionLog_.errorString());sessionLog_.close();return;
+    }
+    if(!enabled||!active)sessionLog_.close();
+    logStatus_->setText((sessionLog_.isOpen()?"기록 중: ":"마지막 로그: ")+QDir::toNativeSeparators(lastLogPath_));
+}
 bool Window::verifyStableLayout() {
     timer_.stop();const auto original=status_->text();
+    const auto originalSettings=captureSettings();QTemporaryDir settingsTestDir;
+    bool settingsRoundTrip=false;
+    if(settingsTestDir.isValid()) {
+        QSettings file(settingsTestDir.filePath("preset.ini"),QSettings::IniFormat);
+        file.setValue("routingPreset",QJsonDocument(originalSettings).toJson(QJsonDocument::Compact));file.sync();
+        QSettings loaded(settingsTestDir.filePath("preset.ini"),QSettings::IniFormat);
+        const auto decoded=QJsonDocument::fromJson(loaded.value("routingPreset").toByteArray()).object();
+        auto invalid=decoded;invalid.insert("sourceMode",-1);
+        settingsRoundTrip=file.status()==QSettings::NoError&&decoded==originalSettings&&applySettings(decoded)&&captureSettings()==originalSettings
+            &&!applySettings(invalid)&&captureSettings()==originalSettings;
+    }
     auto* guide=findChild<QTextBrowser*>("settingsGuide");
     const bool guideReady=guide&&guide->toPlainText().contains("입력 부족")&&guide->toPlainText().contains("독립 CG")&&tabs_->count()==3;
     const bool routingMoved=tabs_->widget(2)->isAncestorOf(session_)&&!tabs_->widget(0)->isAncestorOf(session_)
-        &&tabs_->widget(2)->isAncestorOf(start_)&&tabs_->widget(2)->isAncestorOf(stop_);
+        &&tabs_->widget(2)->isAncestorOf(start_)&&tabs_->widget(2)->isAncestorOf(stop_)
+        &&tabs_->widget(2)->isAncestorOf(monitorRate_)&&!tabs_->widget(0)->isAncestorOf(monitorRate_);
+    const auto previousDirectory=logDirectory_;const bool previousLogging=logEnabled_->isChecked();
+    bool logRoundTrip=false;
+    if(settingsTestDir.isValid()) {
+        logDirectory_=settingsTestDir.path()+"/logs";logEnabled_->setChecked(true);
+        recordLog({{"running",true},{"ticks",1}});recordLog({{"running",true},{"ticks",2},{"overruns",1}});recordLog({{"running",false},{"ticks",3}});
+        QFile records(lastLogPath_);if(records.open(QIODevice::ReadOnly)){
+            const auto lines=records.readAll().trimmed().split('\n');
+            logRoundTrip=lines.size()==3&&QJsonDocument::fromJson(lines[0]).object().value("event")=="session_start"
+                &&QJsonDocument::fromJson(lines[1]).object().value("overruns").toInt()==1&&QJsonDocument::fromJson(lines[2]).object().value("event")=="session_end";
+        }
+        logDirectory_=previousDirectory;logEnabled_->setChecked(previousLogging);
+    }
     auto settle=[&]{for(int k=0;k<4;++k)QApplication::processEvents();};
     auto geometry=[&]{std::array<QRect,6> r;for(int i=0;i<6;++i)r[i]=QRect(monitors_[i]->mapTo(this,QPoint()),monitors_[i]->size());return r;};
     bool stable=true,legacyExpanded=false;const int footerHeight=status_->height();
@@ -363,6 +472,8 @@ bool Window::verifyStableLayout() {
     status_->setText(original);std::cout<<"{\"fixed_footer_stable\":"<<(stable?"true":"false")<<",\"variable_footer_wrap_verified\":"<<(legacyExpanded?"true":"false")<<"}\n";
     std::cout<<"{\"embedded_guide_loaded\":"<<(guideReady?"true":"false")<<"}\n";
     std::cout<<"{\"routing_in_settings\":"<<(routingMoved?"true":"false")<<"}\n";
-    return stable&&legacyExpanded&&guideReady&&routingMoved;
+    std::cout<<"{\"settings_round_trip\":"<<(settingsRoundTrip?"true":"false")<<"}\n";
+    std::cout<<"{\"session_log_round_trip\":"<<(logRoundTrip?"true":"false")<<"}\n";
+    return stable&&legacyExpanded&&guideReady&&routingMoved&&settingsRoundTrip&&logRoundTrip;
 }
 }
