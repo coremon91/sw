@@ -4,7 +4,7 @@
 #include <QSettings>
 #include <QFontDatabase>
 int main(int argc,char** argv) {
-    QApplication app(argc,argv);QCoreApplication::setOrganizationName("SW");QCoreApplication::setApplicationName("Switcher-0.7");QCoreApplication::setApplicationVersion("0.7.4");
+    QApplication app(argc,argv);QCoreApplication::setOrganizationName("SW");QCoreApplication::setApplicationName("Switcher-0.7");QCoreApplication::setApplicationVersion("0.7.5");
     {QSettings settings;
      if(!settings.value("v07Initialized",false).toBool()) {
          QSettings previous("SW","Switcher-0.6");

@@ -99,10 +99,15 @@ void Engine::run(Configuration config) {
         auto rateTime=base;std::array<uint64_t,4> previousCounts{};std::array<double,4> rates{};
         uint64_t monitorFrames=0,previousMonitorFrames=0;double monitorRate=0;
         std::array<FramePtr,4> lastShown;std::array<uint64_t,4> skipped{};
+        TimingMetric wakeTiming,renderTiming;
+        std::array<InputSelectionMetric,4> inputSelection;
+        std::array<TimingMetric,2> cgArrivalTiming;
+        std::array<bool,2> cgArrivalValid{};
         while(true) {
             RenderState state;bool muted;
             { std::lock_guard lock(mutex_);if(quit_) break;state=switcher_.state();muted=muted_; }
             auto begin=std::chrono::steady_clock::now();
+            wakeTiming.observe(std::chrono::duration<double,std::milli>(begin-(base+tickTime(tick))).count());
             for(int i=0;i<4;++i) {
                 if(i==3&&mediaEnabled) {
                     if(tick%format.ticksPerFrame()==0) {
@@ -117,6 +122,16 @@ void Engine::run(Configuration config) {
                         fillPattern(*f,i,tick);frames[i]=f;
                     }
                 } else frames[i]=mail[i].latest();
+            }
+            const auto selectedAt=std::chrono::steady_clock::now();
+            const bool frameBoundary=tick%format.ticksPerFrame()==0;
+            for(int i=0;i<4;++i)inputSelection[i].observe(frames[i],selectedAt,frameBoundary);
+            for(int bus=0;bus<2;++bus) {
+                const auto& key=bus==0?state.program.keyFill:state.preview.keyFill;
+                const auto fill=frames[key.fillSource],matte=frames[key.keySource];
+                cgArrivalValid[bus]=key.enabled&&fill&&matte&&!fill->persistent&&!matte->persistent;
+                if(cgArrivalValid[bus]&&frameBoundary)
+                    cgArrivalTiming[bus].observe(std::abs(std::chrono::duration<double,std::milli>(fill->captured-matte->captured).count()));
             }
             // GUI cadence is independent of SDI processing; adjustable without restarting.
             const bool show=tick%monitorInterval_.load()==0;
@@ -169,6 +184,7 @@ void Engine::run(Configuration config) {
             const bool newMonitor=!result.monitors[0].rgba.empty();if(newMonitor)++monitorFrames;
             const double rateSeconds=std::chrono::duration<double>(end-rateTime).count();
             if(rateSeconds>=1) {for(int i=0;i<4;++i) {rates[i]=double(stats[i].frames-previousCounts[i])/rateSeconds;previousCounts[i]=stats[i].frames;}monitorRate=double(monitorFrames-previousMonitorFrames)/rateSeconds;previousMonitorFrames=monitorFrames;rateTime=end;}
+            renderTiming.observe(std::chrono::duration<double,std::milli>(end-begin).count());
             auto next=base+tickTime(tick+1);
             if(end>next) {
                 ++overruns;
@@ -177,6 +193,8 @@ void Engine::run(Configuration config) {
                 if(end-next>tickTime(4)) {base+=end-next;next=end;}
             }
             { std::unique_lock lock(mutex_);
+              snapshot_.wakeTiming=wakeTiming;snapshot_.renderTiming=renderTiming;
+              snapshot_.inputSelection=inputSelection;snapshot_.cgArrivalTiming=cgArrivalTiming;snapshot_.cgArrivalValid=cgArrivalValid;
               snapshot_.state=state;snapshot_.ticks=tick+1;snapshot_.overruns=overruns;snapshot_.audioUnderruns=audioUnderruns;
               snapshot_.renderMs=std::chrono::duration<double,std::milli>(end-begin).count();snapshot_.io=stats;
               snapshot_.inputFps=rates;

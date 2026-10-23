@@ -30,3 +30,11 @@ Release build, all 7 CTests, --self-test-layout and --engine (start, live comman
 | Minimized | 0 | 6.30 | 0/0 |
 
 Same live configuration and selection method as 0.7.3; approximately 29.23 seconds per counter interval. MMCSS and high-resolution wait successfully applied, policy successful, no audio underrun/overflow increases. These short tests establish no observed regression; they do not demonstrate additional visual improvement over 0.7.3 or long-duration broadcast reliability.
+
+## SW 0.7.5 candidate — per-frame timing and selection diagnostics (NOT live-validated)
+Adds cumulative per-tick wake lateness and render duration totals/maxima, plus input sequence reuse/skip/reset counts sampled once per frame (not both interlaced fields). Logs capture-host age and Key/Fill host-arrival delta for PGM/PVW. These are host callback timestamps, not common-source timecode or proof of genlock alignment. The input selection and CG composition algorithm remain unchanged; no additional video buffer is introduced.
+
+Release compilation succeeded. Core, media fixture, media and routing tests passed.
+Windows App Control blocked the new timing_metrics test executable and the packaged GUI executable. CUDA transfer, D3D11 transfer and CG GPU tests could not start; Code Integrity events 3033/3077 confirmed signing/policy rejection. No security policy was changed and no alternate launch was attempted after the rejection.
+Consequently GUI self-test and ALL FOUR live window-state tests for 0.7.5 are pending. It must not be represented as a verified upgrade or replace the running 0.7.4 deployment.
+Candidate package: dist/SW-0.7.5. Source is kept on codex/timing-metrics-075; main remains the verified 0.7.4 revision. The application/control-policy administrator must approve an appropriate signed/allowed build before these tests can continue.

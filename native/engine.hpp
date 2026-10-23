@@ -1,5 +1,6 @@
 #pragma once
 #include "gpu.hpp"
+#include "timing_metrics.hpp"
 #include "io.hpp"
 #include "media.hpp"
 #include <condition_variable>
@@ -37,6 +38,10 @@ struct Snapshot {
     uint64_t monitorFrames=0;
     double monitorFps=0;
     double renderMs=0, sourceMs=0, gpuMs=0;
+    TimingMetric wakeTiming,renderTiming;
+    std::array<InputSelectionMetric,4> inputSelection;
+    std::array<TimingMetric,2> cgArrivalTiming;
+    std::array<bool,2> cgArrivalValid{};
     bool mmcssApplied=false, highResolutionWait=false;
     unsigned long mmcssError=0, waitTimerError=0;
     bool timerPolicyApplied=false;
