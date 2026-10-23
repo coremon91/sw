@@ -37,6 +37,9 @@ struct Snapshot {
     uint64_t monitorFrames=0;
     double monitorFps=0;
     double renderMs=0, sourceMs=0, gpuMs=0;
+    bool timerPolicyApplied=false;
+    unsigned long timerPolicyError=0;
+    unsigned timerResolutionResult=0;
     std::string adapter,error;
 };
 class Engine {

@@ -37,7 +37,20 @@ void Engine::autoMix(unsigned n) { std::lock_guard lock(mutex_);switcher_.autoMi
 void Engine::setMuted(bool b) { std::lock_guard lock(mutex_);muted_=b; }
 void Engine::run(Configuration config) {
     const auto com=CoInitializeEx(nullptr,COINIT_MULTITHREADED);
-    timeBeginPeriod(1);
+    // Keep the requested timer resolution when Windows 11 occludes this app.
+    // Only control timer resolution; do not change execution-speed QoS here.
+    PROCESS_POWER_THROTTLING_STATE policy{};
+    policy.Version=PROCESS_POWER_THROTTLING_CURRENT_VERSION;
+    policy.ControlMask=PROCESS_POWER_THROTTLING_IGNORE_TIMER_RESOLUTION;
+    policy.StateMask=0;
+    const bool timerPolicyApplied=SetProcessInformation(GetCurrentProcess(),
+        ProcessPowerThrottling,&policy,sizeof(policy))!=FALSE;
+    const DWORD timerPolicyError=timerPolicyApplied?ERROR_SUCCESS:GetLastError();
+    const auto timerResolutionResult=timeBeginPeriod(1);
+    { std::lock_guard lock(mutex_);
+      snapshot_.timerPolicyApplied=timerPolicyApplied;
+      snapshot_.timerPolicyError=timerPolicyError;
+      snapshot_.timerResolutionResult=timerResolutionResult; }
     // Capture callbacks finish before these queues are destroyed.
     std::array<Mailbox,4> mail;
     std::mutex audioMutex;
@@ -170,7 +183,7 @@ void Engine::run(Configuration config) {
     player_.close();
     for(auto& out:outputs) if(out) out->stop();
     inputs={};outputs={};
-    timeEndPeriod(1);if(SUCCEEDED(com)) CoUninitialize();
+    if(timerResolutionResult==TIMERR_NOERROR)timeEndPeriod(1);if(SUCCEEDED(com)) CoUninitialize();
     std::lock_guard lock(mutex_);snapshot_.running=snapshot_.starting=false;
 }
 }
