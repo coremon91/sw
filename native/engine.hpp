@@ -37,6 +37,8 @@ struct Snapshot {
     uint64_t monitorFrames=0;
     double monitorFps=0;
     double renderMs=0, sourceMs=0, gpuMs=0;
+    bool mmcssApplied=false, highResolutionWait=false;
+    unsigned long mmcssError=0, waitTimerError=0;
     bool timerPolicyApplied=false;
     unsigned long timerPolicyError=0;
     unsigned timerResolutionResult=0;
@@ -44,6 +46,7 @@ struct Snapshot {
 };
 class Engine {
 public:
+    Engine();
     ~Engine();
     void start(Configuration);
     void stop();
@@ -64,6 +67,7 @@ private:
     mutable std::mutex mutex_;
     std::condition_variable wake_;
     std::thread worker_;
+    void* stopEvent_=nullptr;
     bool quit_=false, muted_=true;
     Format format_;
     Switcher switcher_;

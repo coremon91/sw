@@ -2,10 +2,12 @@
 #include <windows.h>
 #include <objbase.h>
 #include <mmsystem.h>
+#include <avrt.h>
 #include <cmath>
 #include <limits>
 namespace sw {
-Engine::~Engine() { stop(); }
+Engine::Engine() : stopEvent_(CreateEventW(nullptr,TRUE,FALSE,nullptr)) {}
+Engine::~Engine() { stop();if(stopEvent_)CloseHandle(stopEvent_); }
 void Engine::start(Configuration config) {
     stop();
     if(!config.mediaPath.empty()) {
@@ -16,7 +18,7 @@ void Engine::start(Configuration config) {
         if(config.synthetic) throw std::runtime_error("Receive-only mode cannot use synthetic inputs.");
         validateReceiveRouting(config.inputs,config.mode,config.receiveBackend);
     } else if(!config.synthetic) validateRouting(config.inputs,config.outputs,config.mode);
-    { std::lock_guard lock(mutex_); quit_=false;format_=Format::of(config.mode);switcher_.reset();snapshot_={};snapshot_.starting=true;snapshot_.synthetic=config.synthetic;snapshot_.receiveOnly=config.receiveOnly;
+    { std::lock_guard lock(mutex_); quit_=false;if(stopEvent_)ResetEvent(stopEvent_);format_=Format::of(config.mode);switcher_.reset();snapshot_={};snapshot_.starting=true;snapshot_.synthetic=config.synthetic;snapshot_.receiveOnly=config.receiveOnly;
       for(int i=0;i<4;++i)snapshot_.assigned[i]=config.synthetic||!config.inputs[i].id.empty();
       for(int i=0;i<2;++i)snapshot_.outputAssigned[i]=!config.synthetic&&!config.receiveOnly&&!config.outputs[i].id.empty();
       if(!config.synthetic)for(int i=0;i<4;++i)if(snapshot_.assigned[i]) {switcher_.preview(i);switcher_.cut();switcher_.preview(i);break;}
@@ -24,7 +26,7 @@ void Engine::start(Configuration config) {
     worker_=std::thread([this,config] { run(config); });
 }
 void Engine::stop() {
-    { std::lock_guard lock(mutex_);quit_=true; }wake_.notify_all();
+    { std::lock_guard lock(mutex_);quit_=true;if(stopEvent_)SetEvent(stopEvent_); }wake_.notify_all();
     if(worker_.joinable()) worker_.join();
 }
 Snapshot Engine::snapshot() const { std::lock_guard lock(mutex_);auto s=snapshot_;s.media=player_.status();return s; }
@@ -51,6 +53,15 @@ void Engine::run(Configuration config) {
       snapshot_.timerPolicyApplied=timerPolicyApplied;
       snapshot_.timerPolicyError=timerPolicyError;
       snapshot_.timerResolutionResult=timerResolutionResult; }
+    DWORD mmcssTask=0;
+    HANDLE mmcss=AvSetMmThreadCharacteristicsW(L"Playback",&mmcssTask);
+    const DWORD mmcssError=mmcss?ERROR_SUCCESS:GetLastError();
+    HANDLE waitTimer=stopEvent_?CreateWaitableTimerExW(nullptr,nullptr,
+        CREATE_WAITABLE_TIMER_HIGH_RESOLUTION,TIMER_MODIFY_STATE|SYNCHRONIZE):nullptr;
+    const DWORD waitTimerError=waitTimer?ERROR_SUCCESS:stopEvent_?GetLastError():ERROR_INVALID_HANDLE;
+    { std::lock_guard lock(mutex_);
+      snapshot_.mmcssApplied=mmcss!=nullptr;snapshot_.mmcssError=mmcssError;
+      snapshot_.highResolutionWait=waitTimer!=nullptr;snapshot_.waitTimerError=waitTimerError; }
     // Capture callbacks finish before these queues are destroyed.
     std::array<Mailbox,4> mail;
     std::mutex audioMutex;
@@ -175,7 +186,30 @@ void Engine::run(Configuration config) {
               snapshot_.sourceMs=std::chrono::duration<double,std::milli>(gpuBegin-begin).count();snapshot_.gpuMs=std::chrono::duration<double,std::milli>(gpuEnd-gpuBegin).count();
               for(int i=0;i<4;++i) snapshot_.signal[i]=frames[i]&&(frames[i]->persistent||end-frames[i]->captured<std::chrono::milliseconds(500));
               if(newMonitor) snapshot_.monitors=std::move(result.monitors);
-              switcher_.advance();wake_.wait_until(lock,next,[&]{return quit_;}); }
+              switcher_.advance();
+              if(waitTimer&&!quit_) {
+                  const auto remaining=std::chrono::duration_cast<std::chrono::nanoseconds>(
+                      next-std::chrono::steady_clock::now()).count();
+                  if(remaining>0) {
+                      LARGE_INTEGER due{};due.QuadPart=-((remaining+99)/100);
+                      if(SetWaitableTimer(waitTimer,&due,0,nullptr,nullptr,FALSE)) {
+                          HANDLE handles[]={stopEvent_,waitTimer};
+                          lock.unlock();
+                          const auto result=WaitForMultipleObjects(2,handles,FALSE,INFINITE);
+                          const DWORD waitError=result==WAIT_FAILED?GetLastError():ERROR_SUCCESS;
+                          lock.lock();
+                          if(waitError) {
+                              snapshot_.waitTimerError=waitError;snapshot_.highResolutionWait=false;
+                              CloseHandle(waitTimer);waitTimer=nullptr;
+                              wake_.wait_until(lock,next,[&]{return quit_;});
+                          }
+                      } else {
+                          snapshot_.waitTimerError=GetLastError();snapshot_.highResolutionWait=false;
+                          CloseHandle(waitTimer);waitTimer=nullptr;
+                          wake_.wait_until(lock,next,[&]{return quit_;});
+                      }
+                  }
+              } else wake_.wait_until(lock,next,[&]{return quit_;}); }
             ++tick;
         }
     } catch(const std::exception& e) { std::lock_guard lock(mutex_);snapshot_.error=e.what(); }
@@ -183,6 +217,8 @@ void Engine::run(Configuration config) {
     player_.close();
     for(auto& out:outputs) if(out) out->stop();
     inputs={};outputs={};
+    if(waitTimer)CloseHandle(waitTimer);
+    if(mmcss)AvRevertMmThreadCharacteristics(mmcss);
     if(timerResolutionResult==TIMERR_NOERROR)timeEndPeriod(1);if(SUCCEEDED(com)) CoUninitialize();
     std::lock_guard lock(mutex_);snapshot_.running=snapshot_.starting=false;
 }
